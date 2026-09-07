@@ -8,7 +8,7 @@ Every BT step that joins or creates an interaction uses `SeekNode` under the hoo
 
 | Handle   | Interactions                                   | `target:` shape              | `offer:`              |
 |----------|------------------------------------------------|------------------------------|-----------------------|
-| `NONE`   | `TALK_TO`, `GROUP_CONVERSATION`, `WAVE_AT`, `HUG` | omitted                   | not allowed           |
+| `NONE`   | `TALK_TO`, `GROUP_CONVERSATION`, `WAVE_AT`, `HUG`, `SHAKE_HAND` | omitted                   | not allowed           |
 | `OBJECT` | `USE`, `SIT_ON`, `LIE_ON`, `QUEUE_USE`         | `str` (object id or type)    | not allowed           |
 | `TAG`    | `SERVICE`                                      | `str` (service tag; required for `offer: true`, optional for seekers) | provider side only |
 | `AGENT`  | `BLOCK`                                        | `int` (agent id)             | not allowed           |
@@ -56,11 +56,12 @@ Cascade (first non-null wins):
 | `SERVICE`            | 3.0                  |
 | `WAVE_AT`            | 6.0                   |
 | `BLOCK`              | `DISTANCE_TOLERANCE` |
-| `HUG`                | 0.6                   |
+| `HUG`                | 0.3                   |
+| `SHAKE_HAND`         | 0.3                   |
 
 Source of truth: the `InteractionKind.interaction_radius` fields in [../../arena_humansim/core/interaction_kinds.py](../../arena_humansim/core/interaction_kinds.py).
 
-### `render_pose_override` kinds (e.g. `HUG`)
+### `render_pose_override` kinds (`HUG`, `SHAKE_HAND`)
 
 A dyad whose target formation separation is smaller than the pair's combined `agent_radius` (a hug, unlike a `TALK_TO`, wants the two bodies to actually close in) can never be reached by tuning `interaction_radius` / the formation's `separation` alone: every local planner's own collision-avoidance repulsion between the pair keeps them apart by roughly `agent_radius_a + agent_radius_b`, no matter the target - this is true of every planner (SFM/HSFM, ORCA, learned ones like SocialGAIL/NSP) since it falls out of each one's own avoidance term, not something a scenario or a single planner can be tuned around.
 

@@ -97,22 +97,6 @@ class InteractionManager(Loggable):
         self._formation_targets: dict[int, Pose2D] = {}
         self._current_departed: set[int] = set()
 
-    def reset(self) -> None:
-        """Full reset for a fresh episode: drop every interaction and every index into it.
-
-        Clearing ``interactions`` alone leaves ``_interactions_by_type`` (and the other id-keyed
-        indices) pointing at ids no longer in ``interactions`` - the next episode's ids start
-        fresh too, but if any survive to be looked up, e.g. via ``_scan_symmetric`` iterating a
-        stale ``_interactions_by_type`` bucket, ``self.interactions[iid]`` raises ``KeyError``.
-        """
-        self.interactions.clear()
-        self.next_interaction_id = 0
-        self._agent_membership.clear()
-        self._interaction_by_object_type.clear()
-        self._interactions_by_type.clear()
-        self._formation_targets.clear()
-        self._current_departed.clear()
-
     def _pose_lookup(self, agent_id: int) -> Pose2D | None:
         agent = self._agent_lookup(agent_id)
         return agent.state.pose if agent is not None else None

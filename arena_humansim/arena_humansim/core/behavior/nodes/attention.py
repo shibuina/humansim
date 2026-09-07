@@ -417,12 +417,7 @@ class AttentionNode(py_trees.behaviour.Behaviour):
             mv.posture = posture
 
     def _clip_render_target(self) -> tuple[float, float] | None:
-        """World xy for this clip's render-pose override, if its bound interaction kind wants
-        one (e.g. HUG): local planners never fully close a contact-kind formation's target
-        separation against their own repulsion, so the render layer (task_generator side)
-        substitutes the formation slot for display instead of the physics pose. See
-        InteractionKind.render_pose_override and BaseHumanSimulator._agent_states_to_pedestrians.
-        """
+        """Formation slot xy when the bound interaction kind renders on its formation target."""
         mv = self._bt_mv()
         im = self._ctx.im
         if mv is None or mv.interaction_id is None or im is None:

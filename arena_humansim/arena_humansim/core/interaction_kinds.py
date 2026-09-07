@@ -105,10 +105,7 @@ class InteractionKind:
     interaction_radius: float = DISTANCE_TOLERANCE
     clip: str = ""  # animation clip shown while a participant, authored attention.clip overrides
     posture: str = "standing"  # standing | seated | prone while a participant
-    render_pose_override: bool = False  # formation target replaces the physics pose for display
-    # (task_generator side), for a formation whose target separation is smaller than the
-    # participants' combined agent_radius - no local planner's own repulsion would ever let
-    # the physics pose alone reach it. See AttentionNode._clip_render_target.
+    render_pose_override: bool = False  # display the formation target instead of the physics pose (contact kinds)
 
     @property
     def is_object_bound(self) -> bool:
@@ -256,10 +253,7 @@ def _registry() -> dict[InteractionType, InteractionKind]:
             handle=_SYMMETRIC_HANDLE,
             contract_defaults=ContractDefaults(min_participants=2, max_participants=2, queueable=False),
             formation_default=None,
-            # A wave is recognized at a distance, not on contact - radius must clear typical
-            # vision_range (mean 5.0, see AgentParams) so drift eviction doesn't tear the pair
-            # apart the instant they match while still standing far apart.
-            interaction_radius=6.0,
+            interaction_radius=6.0,  # above typical vision_range, a wave is matched at a distance
             clip="wave",
         ),
         InteractionType.HUG: InteractionKind(
@@ -275,9 +269,6 @@ def _registry() -> dict[InteractionType, InteractionKind]:
             label="SHAKE",
             handle=_SYMMETRIC_HANDLE,
             contract_defaults=ContractDefaults(min_participants=2, max_participants=2, queueable=False),
-            # Arm's-length separation, tighter than combined agent_radius (default 0.35 each) would
-            # reliably close via local-planner repulsion alone - same render_pose_override rationale
-            # as HUG (see the note on InteractionKind.render_pose_override above).
             formation_default=_fs("dyad", AnchorKind.CENTROID, {"separation": 0.6}),
             interaction_radius=0.3,
             clip="shake_hand",

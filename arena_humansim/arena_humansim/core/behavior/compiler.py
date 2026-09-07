@@ -368,7 +368,9 @@ class _StepRecipe:
         self.action_defs = action_defs
         self.utility_weights = utility_weights
 
-    def build(self, agent: BaseAgent, world: WorldKnowledge, event_bus: EventBus, rng: np.random.Generator, dt: float, agent_lookup: AgentLookup | None = None, pool: AgentPool | None = None, is_bound_lookup: IsBoundLookup | None = None, im: InteractionManager | None = None, name_lookup: NameLookup | None = None) -> py_trees.behaviour.Behaviour:
+    def build(
+        self, agent: BaseAgent, world: WorldKnowledge, event_bus: EventBus, rng: np.random.Generator, dt: float, agent_lookup: AgentLookup | None = None, pool: AgentPool | None = None, is_bound_lookup: IsBoundLookup | None = None, im: InteractionManager | None = None, name_lookup: NameLookup | None = None
+    ) -> py_trees.behaviour.Behaviour:
         step = self.step_def
         if isinstance(step, AttentionStepDef):
             return _expand_attention_step(self.node_name, step, agent, world, rng, dt, is_bound_lookup=is_bound_lookup, im=im, agent_lookup=agent_lookup, name_lookup=name_lookup)
