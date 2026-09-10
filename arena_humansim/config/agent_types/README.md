@@ -208,6 +208,13 @@ For a `dynamic:` scenario entry, `ArenaHumanDynamicObstacle.sample_params` (in [
 
 ## Included types
 
-- `adult` - nominal pedestrian (desired 1.1 m/s, 5 m vision, 180deg FOV).
-- `elder` - slower, narrower FOV, longer SFM relaxation. Demonstrates how heterogeneity drops out of a handful of distribution tweaks.
-- `robot` - fixed (non-distribution) values for a robot-driven agent: zero `min_turning_radius`, 360deg FOV, no `idle_gaze_rate`.
+| Type | What it is | What sets it apart |
+|---|---|---|
+| `adult` | the reference pedestrian | 1.1 m/s, 0.25 m body, sees 5 m over 180 deg |
+| `elder` | slow and cautious | 0.75 m/s, longer reaction, stronger repulsion |
+| `child` | small, quick, impulsive | 0.18 m body, speed 0.4 to 1.8 m/s, sees 3 m, weak repulsion |
+| `hurried` | someone late | 1.7 m/s, tunnel vision, cuts close |
+| `distracted` | a phone-walker | sees 2 m over 90 deg, reacts slowly |
+| `robot` | a robot mirrored into the crowd | fixed values: zero `min_turning_radius`, 360 deg FOV, no `idle_gaze_rate` |
+
+All but `robot` are `mode: simple` and `extends: adult`, so every kinematic field is present on each of them. Scenarios name them bare (`agent_type: hurried`).
