@@ -1,0 +1,9 @@
+# Update parameters of already-spawned agents in place, mid-episode: no respawn, so position,
+# velocity and route continue. Each entry names an agent by id; a field left at 0.0 / empty keeps
+# the agent's current value, `agent_type` re-resolves the whole parameter set from that type first
+# (then the numeric fields override). Pose, waypoints, kind and policy are ignored here.
+arena_humansim_msgs/AgentState[] agents
+---
+bool success
+string message
+int32[] updated_ids

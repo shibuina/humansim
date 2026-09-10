@@ -38,6 +38,7 @@ from arena_humansim_msgs.srv import (
     SetFlow,
     SetWaypoints,
     SpawnAgents,
+    UpdateAgents,
     UpdateRobot,
 )
 from geometry_msgs.msg import Point32, Vector3
@@ -468,6 +469,11 @@ class AgentManager(Node):
             RemoveAgents,
             "remove_agents",
             self._remove_agents_callback,
+        )
+        self._update_srv = self.create_service(
+            UpdateAgents,
+            "update_agents",
+            self._update_agents_callback,
         )
         self._update_robot_srv = self.create_service(
             UpdateRobot,
@@ -904,7 +910,7 @@ class AgentManager(Node):
     @staticmethod
     def _apply_agent_overrides(agent: BaseAgent, agent_msg: AgentStateMsg) -> bool:
         """Apply the per-agent fields of an `AgentState` message (0.0 = keep) to `agent`'s
-        parameters and state. Returns whether anything changed."""
+        parameters and state. Returns whether anything changed. Shared by spawn and update."""
         import attrs
 
         overrides = {}
@@ -2127,6 +2133,52 @@ class AgentManager(Node):
         moved = math.hypot(snapped.x - pose.x, snapped.y - pose.y)
         self._logger.warning(f"agent {agent.state.agent_id} spawn ({pose.x:.2f}, {pose.y:.2f}) is inside an obstacle; moved {moved:.2f} m to ({snapped.x:.2f}, {snapped.y:.2f})")
         agent.state.pose = snapped
+
+    def _update_agents_callback(
+        self,
+        request: UpdateAgents.Request,
+        response: UpdateAgents.Response,
+    ) -> UpdateAgents.Response:
+        """Change already-spawned agents' parameters *in place*: no respawn, so position,
+        velocity, route and behaviour tree continue. A non-empty `agent_type` re-resolves the
+        parameter set from that type first; the numeric fields (0.0 = keep) then override. The
+        pool rows and every pool extension (the local planner's per-agent arrays) are refreshed."""
+        import attrs
+
+        updated: list[int] = []
+        skipped: list[int] = []
+        for agent_msg in request.agents:
+            aid = int(agent_msg.agent_id)
+            agent = self._agents.get(aid)
+            if agent is None:
+                skipped.append(aid)
+                continue
+            if agent_msg.agent_type:
+                # Re-resolve the whole set from the type, as a spawn would, then keep the live state.
+                fresh = self._build_base_agent(aid, agent_msg, [])
+                agent.params = attrs.evolve(fresh.params, name=fresh.params.name)
+                agent.state.desired_velocity = fresh.state.desired_velocity
+            else:
+                self._apply_agent_overrides(agent, agent_msg)
+            if aid in self._pool._id_to_idx:
+                self._pool.update_agent(agent)
+            cmd = self._high_level_cmds.get(aid)
+            if cmd is not None:
+                try:
+                    self._high_level_cmds[aid] = attrs.evolve(cmd, desired_velocity=agent.state.desired_velocity)
+                except Exception:  # noqa: BLE001 - a plain object: set the field
+                    cmd.desired_velocity = agent.state.desired_velocity
+            updated.append(aid)
+        response.success = bool(updated)
+        response.updated_ids = updated
+        response.message = f"Updated {len(updated)} agent(s)" + (f", {len(skipped)} unknown id(s) skipped: {skipped}" if skipped else "")
+        # Two call sites on purpose: rclpy caches a severity per call site and raises when the
+        # same line logs at two levels.
+        if updated:
+            self._logger.info(response.message)
+        else:
+            self._logger.warning(response.message)
+        return response
 
     def _remove_agents_callback(
         self,

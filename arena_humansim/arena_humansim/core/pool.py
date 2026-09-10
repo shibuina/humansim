@@ -36,6 +36,10 @@ class PoolAware:
     def on_pool_swap(self, idx: int, last: int) -> None:
         pass
 
+    def on_pool_update(self, idx: int, agent: BaseAgent) -> None:
+        """The agent at `idx` has new parameters (`AgentPool.update_agent`); re-read what you cache."""
+        pass
+
     def on_pool_reset(self) -> None:
         pass
 
@@ -130,6 +134,27 @@ class AgentPool:
 
         for ext in self._extensions:
             ext.on_pool_add(i, agent)
+        return i
+
+    def update_agent(self, agent: BaseAgent) -> int:
+        """Rewrite the parameter rows of an agent that is already in the pool - position,
+        velocity, goals and latches stay as they are. Returns the row."""
+        i = self._id_to_idx[agent.state.agent_id]
+        self.desired_vel[i] = agent.state.desired_velocity
+        p = agent.params
+        self.agent_radius[i] = p.agent_radius
+        self.max_velocity[i] = p.max_velocity
+        self.max_acceleration[i] = p.max_acceleration
+        self.max_deceleration[i] = p.max_deceleration
+        self.min_turning_radius[i] = p.min_turning_radius
+        self.pivot_angular_velocity[i] = p.pivot_angular_velocity
+        perc = p.perception
+        self.vision_range[i] = perc.vision_range
+        self.vision_fov[i] = perc.vision_fov
+        self.proximity_sense[i] = perc.proximity_sense
+        self.vision_occlusion[i] = perc.vision_occlusion
+        for ext in self._extensions:
+            ext.on_pool_update(i, agent)
         return i
 
     def swap_remove(self, agent_id: int) -> int | None:
