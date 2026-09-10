@@ -38,6 +38,7 @@ from arena_humansim_msgs.srv import (
     SetFlow,
     SetWaypoints,
     SpawnAgents,
+    UpdateAgents,
     UpdateRobot,
 )
 from geometry_msgs.msg import Point32, Vector3
@@ -145,6 +146,10 @@ _MSG_BLOCK = 16
 
 _EXTERNAL_TIMEOUT_S = 2.0
 _EXTERNAL_ADOPT_RADIUS = 1.0
+
+
+#: `AgentState` fields that override a local planner param of one agent (0.0 = keep).
+_LP_OVERRIDE_KEYS = ("relaxation_time", "repulsion_strength", "repulsion_range")
 
 
 @attrs.frozen
@@ -480,6 +485,11 @@ class AgentManager(Node):
             RemoveAgents,
             "remove_agents",
             self._remove_agents_callback,
+        )
+        self._update_srv = self.create_service(
+            UpdateAgents,
+            "update_agents",
+            self._update_agents_callback,
         )
         self._update_robot_srv = self.create_service(
             UpdateRobot,
@@ -1067,8 +1077,6 @@ class AgentManager(Node):
         agent_msg: AgentStateMsg,
         waypoints: Iterable[Pose2D],
     ) -> BaseAgent:
-        import attrs
-
         type_name = agent_msg.agent_type or "adult"
 
         state = AgentState(
@@ -1110,6 +1118,21 @@ class AgentManager(Node):
             )
             agent = create_agent(params, state, self._module_pool, self._module_selections)
 
+        self._apply_agent_overrides(agent, agent_msg)
+        self._pinned[aid] = _Pinned(
+            local_planner=agent_type is not None and bool(agent_type.local_planner),
+            global_planner=agent_type is not None and bool(agent_type.global_planner),
+            lp_keys=frozenset(k for k in _LP_OVERRIDE_KEYS if getattr(agent_msg, k) > 0.0),
+        )
+        agent.movement = WaypointMovement(waypoints=waypoints)
+        return agent
+
+    @staticmethod
+    def _apply_agent_overrides(agent: BaseAgent, agent_msg: AgentStateMsg) -> bool:
+        """Apply the per-agent fields of an `AgentState` message (0.0 = keep) to `agent`'s
+        parameters and state. Returns whether anything changed. Shared by spawn and update."""
+        import attrs
+
         overrides = {}
         if agent_msg.radius > 0.0:
             overrides["agent_radius"] = agent_msg.radius
@@ -1118,6 +1141,8 @@ class AgentManager(Node):
         vel_val = agent_msg.desired_velocity
         if vel_val > 0.0:
             overrides["desired_velocity"] = vel_val
+        if agent_msg.max_velocity > 0.0:
+            overrides["max_velocity"] = agent_msg.max_velocity
 
         perception_overrides = {}
         for field_name in ("vision_range", "vision_fov"):
@@ -1131,25 +1156,18 @@ class AgentManager(Node):
             )
 
         lp_overrides = {}
-        for field_name in ("relaxation_time", "repulsion_strength", "repulsion_range"):
+        for field_name in _LP_OVERRIDE_KEYS:
             val = getattr(agent_msg, field_name)
             if val > 0.0:
                 lp_overrides[field_name] = val
         if lp_overrides:
             overrides["local_planner_params"] = {**agent.params.local_planner_params, **lp_overrides}
-        self._pinned[aid] = _Pinned(
-            local_planner=agent_type is not None and bool(agent_type.local_planner),
-            global_planner=agent_type is not None and bool(agent_type.global_planner),
-            lp_keys=frozenset(lp_overrides),
-        )
 
         if overrides:
             agent.params = attrs.evolve(agent.params, **overrides)
             if "desired_velocity" in overrides:
                 agent.state.desired_velocity = overrides["desired_velocity"]
-
-        agent.movement = WaypointMovement(waypoints=waypoints)
-        return agent
+        return bool(overrides)
 
     def _build_base_agent_from_spawn(
         self,
@@ -2300,6 +2318,56 @@ class AgentManager(Node):
         response.message = f"Spawned {len(spawned_ids)} agent(s)"
         response.spawned_ids = spawned_ids
         self._logger.info(response.message)
+        return response
+
+    def _update_agents_callback(
+        self,
+        request: UpdateAgents.Request,
+        response: UpdateAgents.Response,
+    ) -> UpdateAgents.Response:
+        """Change already-spawned agents' parameters *in place*: no respawn, so position,
+        velocity, route and behaviour tree continue. A non-empty `agent_type` re-resolves the
+        parameter set from that type first; the numeric fields (0.0 = keep) then override. The
+        pool rows and every pool extension (the local planner's per-agent arrays) are refreshed."""
+        import attrs
+
+        updated: list[int] = []
+        skipped: list[int] = []
+        for agent_msg in request.agents:
+            aid = int(agent_msg.agent_id)
+            agent = self._agents.get(aid)
+            if agent is None:
+                skipped.append(aid)
+                continue
+            if agent_msg.agent_type:
+                # Re-resolve the whole set from the type, as a spawn would, then keep the live state.
+                fresh = self._build_base_agent(aid, agent_msg, [])
+                agent.params = attrs.evolve(fresh.params, name=fresh.params.name)
+                agent.state.desired_velocity = fresh.state.desired_velocity
+            else:
+                self._apply_agent_overrides(agent, agent_msg)
+                lp_keys = frozenset(k for k in _LP_OVERRIDE_KEYS if getattr(agent_msg, k) > 0.0)
+                if lp_keys:
+                    pinned = self._pinned.get(aid, _Pinned())
+                    self._pinned[aid] = attrs.evolve(pinned, lp_keys=pinned.lp_keys | lp_keys)
+            if aid in self._pool._id_to_idx:
+                self._pool.update_agent(agent)
+            cmd = self._high_level_cmds.get(aid)
+            if cmd is not None:
+                try:
+                    self._high_level_cmds[aid] = attrs.evolve(cmd, desired_velocity=agent.state.desired_velocity)
+                except Exception:  # noqa: BLE001 - a plain object: set the field
+                    cmd.desired_velocity = agent.state.desired_velocity
+            updated.append(aid)
+        response.success = bool(updated)
+        response.updated_ids = updated
+        response.message = f"Updated {len(updated)} agent(s)" + (f", {len(skipped)} unknown id(s) skipped: {skipped}" if skipped else "")
+        # Two call sites on purpose: rclpy caches a severity per call site and raises when the
+        # same line logs at two levels.
+        if updated:
+            self._logger.info(response.message)
+        else:
+            self._logger.warning(response.message)
         return response
 
     def _remove_agents_callback(
