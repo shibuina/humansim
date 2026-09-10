@@ -68,6 +68,11 @@ def simplify_path(
     return [waypoints[i] for i in range(n) if not removed[i]]
 
 
+#: Metres. An intermediate path waypoint counts as reached inside this radius (below the
+#: 0.38 m wall inflation, so cutting the corner never crosses a wall).
+WAYPOINT_REACH_M = 0.3
+
+
 class GlobalPlanner(PoolAware, WallAware, Loggable, ABC):
     @abstractmethod
     def compute(
@@ -88,6 +93,11 @@ class GlobalPlanner(PoolAware, WallAware, Loggable, ABC):
     def snap_terminal(self, pose: Pose2D) -> Pose2D:
         return pose
 
+    def snap_spawn(self, pose: Pose2D, radius: float) -> Pose2D:
+        """Where an agent of `radius` spawning at `pose` should stand: `pose` itself when it
+        is clear of the furnished grid, otherwise the nearest cell with room for its body."""
+        return pose
+
     def publish_markers(self, pub: MarkerPublisher) -> None:
         pass
 
@@ -96,14 +106,25 @@ class GlobalPlanner(PoolAware, WallAware, Loggable, ABC):
         agent_pos: Pose2D,
         waypoints: Sequence[Pose2D],
         current_idx: int,
+        reach: float = WAYPOINT_REACH_M,
     ) -> int:
+        """Index of the path segment the agent is on.
+
+        A segment is left when the agent has passed its end point along the segment's
+        direction, *or* stands within `reach` of that point: the local planner never lands
+        exactly on an intermediate waypoint, and one pushed out to the wall-inflation margin
+        sits where wall repulsion holds the agent a few centimetres short. Without the reach
+        the attraction force collapses on that point and the agent stands there for good.
+        """
         idx = current_idx
+        reach_sq = reach * reach
         while idx < len(waypoints) - 1:
             wp = waypoints[idx]
             nxt = waypoints[idx + 1]
             dx, dy = nxt.x - wp.x, nxt.y - wp.y
             tx, ty = agent_pos.x - wp.x, agent_pos.y - wp.y
-            if dx * tx + dy * ty >= dx * dx + dy * dy:
+            nx, ny = agent_pos.x - nxt.x, agent_pos.y - nxt.y
+            if dx * tx + dy * ty >= dx * dx + dy * dy or nx * nx + ny * ny <= reach_sq:
                 idx += 1
             else:
                 break
@@ -112,6 +133,10 @@ class GlobalPlanner(PoolAware, WallAware, Loggable, ABC):
     @classmethod
     def register(cls, name: str) -> Callable[[Callable[[], type[GlobalPlanner]]], Callable[[], type[GlobalPlanner]]]:
         return _registry.register(name)
+
+    @classmethod
+    def get_class(cls, name: str) -> type[GlobalPlanner]:
+        return _registry.get(name)
 
     @classmethod
     def create(cls, name: str, *args: Any, **kwargs: Any) -> GlobalPlanner:

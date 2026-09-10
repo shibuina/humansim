@@ -16,9 +16,9 @@ Velocity commands for the next tick, given each agent's global subgoal and neigh
 
 ```python
 class LocalPlanner(WallAware, Loggable, ABC):
-    supports_pool: bool = False       # opt into compute_pool fast-path
-    needs_global_subgoal: bool = True # set False to skip global planning
-    provides_heading: bool = False    # set True to own pool.theta - agent_manager skips its heading update
+    supports_pool: bool = False  # opt into compute_pool fast-path
+    needs_global_subgoal: bool = True  # set False to skip global planning
+    provides_heading: bool = False  # set True to own pool.theta - agent_manager skips its heading update
 
     PARAM_DEFAULTS: ClassVar[dict[str, ParamDist]] = {}
 
@@ -45,10 +45,11 @@ def attach(self, pool):
     self._foo = np.zeros(pool.capacity, dtype=np.float64)
     pool.register_extension(self)
 
-def on_pool_grow(self, new_capacity, old_capacity): ...   # resize
-def on_pool_add(self, idx, agent): ...                    # populate from agent.params.local_planner_params[...]
-def on_pool_swap(self, idx, last): ...                    # swap_remove copy [last] -> [idx]
-def on_pool_reset(self): ...                              # usually no-op; n=0 makes slots inert
+
+def on_pool_grow(self, new_capacity, old_capacity): ...  # resize
+def on_pool_add(self, idx, agent): ...  # populate from agent.params.local_planner_params[...]
+def on_pool_swap(self, idx, last): ...  # swap_remove copy [last] -> [idx]
+def on_pool_reset(self): ...  # usually no-op; n=0 makes slots inert
 ```
 
 `AgentPool` dispatches the four hooks from its lifecycle chokepoints. Registration must happen before any agents are added.

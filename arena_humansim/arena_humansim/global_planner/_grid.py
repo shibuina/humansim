@@ -1,11 +1,132 @@
 from __future__ import annotations
 
 import math
+from collections import deque
 from collections.abc import Iterable, Sequence
 
 import numpy as np
+from scipy.ndimage import distance_transform_edt, label
 
 from arena_humansim.utils.types import Pose2D, Segments
+
+#: Extra room a spawn snap leaves between an agent's body and the furnished grid.
+SPAWN_MARGIN_M = 0.1
+
+#: Free regions smaller than this share of the largest one are pockets the inflation has
+#: sealed off; they count as occupied.
+POCKET_FRACTION = 0.25
+
+
+def fill_pockets(grid: np.ndarray, fraction: float = POCKET_FRACTION) -> tuple[np.ndarray, int]:
+    """`grid` with every free component smaller than `fraction` of the largest marked
+    occupied (value 2), and the number of pockets filled."""
+    labels, count = label(grid == 0)
+    if count < 2:
+        return grid, 0
+    sizes = np.bincount(labels.ravel())
+    sizes[0] = 0
+    small = sizes < fraction * sizes.max()
+    small[0] = False
+    pockets = small[labels]
+    if not pockets.any():
+        return grid, 0
+    out = grid.copy()
+    out[pockets] = 2
+    return out, int(small.sum())
+
+
+def nearest_free_map(grid: np.ndarray) -> np.ndarray | None:
+    """For every cell, the (row, col) of the nearest free cell - `None` when nothing is free.
+
+    One distance transform per grid replaces a ring search, which is pure Python and cost a
+    stuck agent (start deep inside a furniture inflation) 100 ms of every tick.
+    """
+    if not (grid == 0).any():
+        return None
+    return distance_transform_edt(grid != 0, return_distances=False, return_indices=True)
+
+
+#: Cells a walk-based snap explores before giving up and taking the straight-line answer.
+WALK_LIMIT_CELLS = 40000
+
+
+def nearest_by_walk(passable: np.ndarray, wanted: np.ndarray, start: tuple[int, int], limit: int = WALK_LIMIT_CELLS) -> tuple[int, int] | None:
+    """The first `wanted` cell a 4-connected walk over `passable` cells reaches from `start`
+    (which may itself be impassable). `None` when nothing is reached within `limit` cells."""
+    rows, cols = passable.shape
+    seen = np.zeros_like(passable, dtype=np.bool_)
+    seen[start] = True
+    queue: deque[tuple[int, int]] = deque([start])
+    explored = 0
+    while queue and explored < limit:
+        r, c = queue.popleft()
+        explored += 1
+        if wanted[r, c]:
+            return (r, c)
+        for nr, nc in ((r - 1, c), (r + 1, c), (r, c - 1), (r, c + 1)):
+            if 0 <= nr < rows and 0 <= nc < cols and not seen[nr, nc] and passable[nr, nc]:
+                seen[nr, nc] = True
+                queue.append((nr, nc))
+    return None
+
+
+class SnapMaps:
+    """Per-grid lookups behind `snap_pose`: (blocked, nearest) maps per clearance and the
+    walk results per (clearance, cell). Replace it with the grid."""
+
+    def __init__(self) -> None:
+        self.maps: dict[int, tuple[np.ndarray, np.ndarray | None]] = {}
+        self.walked: dict[tuple[int, int, int], tuple[int, int] | None] = {}
+
+
+def snap_pose(
+    grid: np.ndarray | None,
+    origin: Pose2D,
+    resolution: float,
+    inflation: float,
+    pose: Pose2D,
+    radius: float,
+    cache: SnapMaps,
+    passable: np.ndarray | None = None,
+) -> Pose2D:
+    """`pose` when an agent of `radius` fits there, else the nearest cell where it does.
+
+    A cell fits when it is free and at least `radius + SPAWN_MARGIN_M - inflation` from the
+    occupied region (`radius` 0 asks for any free cell, as a waypoint does). With `passable`
+    (the walls alone, uninflated) the nearest cell is the first one a walk from `pose` reaches
+    without crossing a wall; without it, the nearest by straight line - which is on the far
+    side of a wall as often as not when the room's whole free space is a sealed pocket.
+    """
+    if grid is None:
+        return pose
+    rows, cols = grid.shape
+    rc = world_to_grid(origin, resolution, pose.x, pose.y)
+    if not (0 <= rc[0] < rows and 0 <= rc[1] < cols):
+        return pose
+    k = int(math.ceil(max(radius + SPAWN_MARGIN_M - inflation, 0.0) / resolution)) if radius > 0 else 0
+    maps = cache.maps.get(k)
+    if maps is None:
+        blocked = grid != 0
+        if k > 0:
+            blocked = blocked | (distance_transform_edt(grid == 0) < k)
+        blocked = blocked.astype(np.uint8)
+        maps = (blocked, nearest_free_map(blocked))
+        cache.maps[k] = maps
+    blocked, nearest = maps
+    if not blocked[rc[0], rc[1]] or nearest is None:
+        return pose
+    snapped: tuple[int, int] | None = None
+    if passable is not None:
+        key = (k, rc[0], rc[1])
+        if key not in cache.walked:
+            cache.walked[key] = nearest_by_walk(passable == 0, blocked == 0, rc)
+        snapped = cache.walked[key]
+    if snapped is None:
+        snapped = (int(nearest[0, rc[0], rc[1]]), int(nearest[1, rc[0], rc[1]]))
+    if snapped == rc:
+        return pose
+    cell = grid_to_world(origin, resolution, snapped[0], snapped[1])
+    return Pose2D(x=cell.x, y=cell.y, theta=pose.theta)
 
 
 def world_to_grid(origin: Pose2D, resolution: float, wx: float, wy: float) -> tuple[int, int]:

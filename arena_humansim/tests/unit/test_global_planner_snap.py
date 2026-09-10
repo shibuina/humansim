@@ -5,8 +5,8 @@ from collections.abc import Callable
 from typing import Any
 
 import pytest
-
 from arena_humansim.core.agents.base import BaseAgent
+from arena_humansim.global_planner._grid import SPAWN_MARGIN_M
 from arena_humansim.global_planner.astar import AStarPlanner
 from arena_humansim.global_planner.dijkstra import DijkstraPlanner
 from arena_humansim.utils.types import Pose2D, Segments
@@ -123,3 +123,45 @@ def test_cached_path_last_waypoint_not_in_wall(
     assert 1 in paths and len(paths[1]) >= 1
     last = paths[1][-1]
     assert _dist_to_walls(last, walls) >= _INFLATION - _CELL_DIAG_HALF - 1e-6
+
+
+def _room_with_sofa() -> Segments:
+    room: Segments = [((-5.0, -5.0), (5.0, -5.0)), ((5.0, -5.0), (5.0, 5.0)), ((5.0, 5.0), (-5.0, 5.0)), ((-5.0, 5.0), (-5.0, -5.0))]
+    sofa: Segments = [((-1.0, -0.5), (1.0, -0.5)), ((1.0, -0.5), (1.0, 0.5)), ((1.0, 0.5), (-1.0, 0.5)), ((-1.0, 0.5), (-1.0, -0.5))]
+    return room + sofa
+
+
+def test_snap_spawn_moves_a_body_out_of_furniture_with_room_to_spare() -> None:
+    planner = AStarPlanner(inflation_radius=0.25, resolution=0.1)
+    planner.set_walls(_room_with_sofa())
+    radius = 0.36
+    inside = Pose2D(x=0.3, y=0.1, theta=1.0)
+    out = planner.snap_spawn(inside, radius)
+    assert out is not inside and out.theta == 1.0
+    assert _dist_to_walls(out, _room_with_sofa()) >= radius + SPAWN_MARGIN_M - _CELL_DIAG_HALF
+    assert math.hypot(out.x - inside.x, out.y - inside.y) < 1.5, "the nearest clear cell, not a far one"
+
+
+def test_snap_spawn_leaves_a_clear_spawn_alone() -> None:
+    planner = AStarPlanner(inflation_radius=0.25, resolution=0.1)
+    planner.set_walls(_room_with_sofa())
+    clear = Pose2D(x=3.0, y=3.0, theta=0.0)
+    assert planner.snap_spawn(clear, 0.36) is clear
+    # touching the inflation but with no room for the body is not clear
+    edge = Pose2D(x=0.0, y=0.95, theta=0.0)
+    assert planner.snap_spawn(edge, 0.36) is not edge
+    assert planner.snap_spawn(edge, 0.05) is edge
+
+
+def test_snap_spawn_is_a_no_op_without_walls(planner_cls: type) -> None:
+    planner = planner_cls()
+    pose = Pose2D(x=0.0, y=0.0, theta=0.0)
+    assert planner.snap_spawn(pose, 0.3) is pose
+
+
+def test_every_grid_planner_snaps_a_spawn_out_of_furniture(planner_cls: type) -> None:
+    planner = planner_cls(inflation_radius=0.25)
+    planner.set_walls(_room_with_sofa())
+    inside = Pose2D(x=0.3, y=0.1, theta=0.0)
+    out = planner.snap_spawn(inside, 0.36)
+    assert out is not inside and _dist_to_walls(out, _room_with_sofa()) > 0.36

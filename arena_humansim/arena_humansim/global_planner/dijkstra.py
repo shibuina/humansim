@@ -13,11 +13,14 @@ from arena_humansim.utils.types import CommandType, HighLevelCommand, Pose2D, Se
 
 from . import GlobalPlanner
 from ._grid import (
+    SnapMaps,
+    fill_pockets,
     grid_to_world,
     needs_replan,
     next_waypoint,
     push_from_walls,
     simplify_with_los,
+    snap_pose,
     world_to_grid,
 )
 
@@ -177,11 +180,13 @@ class DijkstraPlanner(GlobalPlanner):
         self._wall_segments: list[Segment] = []
 
         self._path_cache: dict[int, tuple[tuple[float, float], list[Pose2D], int]] = {}
+        self._snap = SnapMaps()
 
         self._cached_results: dict[int, Pose2D] = {}
 
     def set_walls(self, segments: Segments) -> None:
         self._path_cache.clear()
+        self._snap = SnapMaps()
         self._grid_graph = None
         self._wall_segments = list(segments)
         if not segments:
@@ -217,10 +222,12 @@ class DijkstraPlanner(GlobalPlanner):
             y, x = np.ogrid[-radius_cells : radius_cells + 1, -radius_cells : radius_cells + 1]
             kernel = (x * x + y * y) <= radius_cells * radius_cells
             grid = binary_dilation(grid, structure=kernel).astype(np.uint8)
+        grid, pockets = fill_pockets(grid)
 
         self._occupancy_grid = grid
         self._grid_graph = _build_grid_graph(grid)
-        self._logger.info(f"Walls rasterized: {cols}x{rows} ({cols * rows} cells), res={res}m, {len(segments)} segment(s), inflation={self._inflation_radius}m ({radius_cells} cells), graph edges={self._grid_graph.nnz}")
+        pocket_note = f", {pockets} sealed pocket(s) filled" if pockets else ""
+        self._logger.info(f"Walls rasterized: {cols}x{rows} ({cols * rows} cells), res={res}m, {len(segments)} segment(s), inflation={self._inflation_radius}m ({radius_cells} cells), graph edges={self._grid_graph.nnz}{pocket_note}")
 
     def get_cached_goals(self) -> dict[int, Pose2D]:
         return dict(self._cached_results)
@@ -244,6 +251,9 @@ class DijkstraPlanner(GlobalPlanner):
             return pose
         cell = grid_to_world(self._origin, self._resolution, snapped[0], snapped[1])
         return Pose2D(x=cell.x, y=cell.y, theta=pose.theta)
+
+    def snap_spawn(self, pose: Pose2D, radius: float) -> Pose2D:
+        return snap_pose(self._occupancy_grid, self._origin, self._resolution, self._inflation_radius, pose, radius, self._snap)
 
     def compute(
         self,

@@ -18,7 +18,10 @@ class MotionAnimation(Loggable, ABC):
     @abstractmethod
     def compute_batch(
         self,
-        agents, velocities, interactions, dt,
+        agents,
+        velocities,
+        interactions,
+        dt,
     ) -> dict[int, Pose2D]: ...
 
     def compute_batch_pool(self, pool, interactions, dt) -> None: ...

@@ -82,7 +82,8 @@ class HoldNode(py_trees.behaviour.Behaviour):
             return py_trees.common.Status.SUCCESS
         # Bound agents are driven by the formation emitter; overwriting movement.command
         # here would freeze followers mid-ride. Let formation own motion, just tick time.
-        if not self._bound():
+        if not self._bound() and isinstance(self._agent.movement, BehaviorTreeMovement):
+            # an agent on the waypoint driver has no command slot; the tree only keeps time for it
             cmd = _nav_command(self._agent, self._agent.state.pose)
             cmd.desired_velocity = 0.0
             self._agent.movement.command = cmd

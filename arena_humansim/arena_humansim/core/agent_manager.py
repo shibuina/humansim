@@ -93,6 +93,7 @@ from arena_humansim.utils.types import (
     InteractionOutcome,
     Pose2D,
     SeekSpec,
+    Segment,
     Segments,
     Shape,
     SinkConfig,
@@ -117,6 +118,26 @@ class ObstacleData:
 
 
 _MSG_BLOCK = 16
+
+
+def global_plan_segments(walls: Iterable[Segment], obstacles: Iterable[ObstacleData], min_extent: float) -> tuple[list[Segment], list[Segment]]:
+    """Split what the *global* planner rasterises into (full, thin): every wall and every
+    obstacle whose bounding box is at least `min_extent` m along its longer side are `full`
+    (inflated by the planner's radius); smaller furniture (chairs, boards, bins) is `thin`.
+
+    A thin obstacle still blocks its own footprint - so paths go round chairs instead of the
+    local planner stalling head-on against one - but it is not inflated by an agent radius:
+    on a furnished meeting room that inflation filled the room solid and a chair 0.3 m behind
+    a doorway sealed it (arena_arena_002, 2026-08-28). The local planner and the collision
+    resolver still see every segment. `min_extent` 0 makes everything `full`.
+    """
+    full = list(walls)
+    thin: list[Segment] = []
+    for obs in obstacles:
+        x_min, x_max, y_min, y_max = obs.bb[:4]
+        (full if max(x_max - x_min, y_max - y_min) >= min_extent else thin).extend(obs.wall_segments)
+    return full, thin
+
 
 _EXTERNAL_TIMEOUT_S = 2.0
 _EXTERNAL_ADOPT_RADIUS = 1.0
@@ -227,6 +248,11 @@ class AgentManager(Node):
         self.declare_parameter("log_dir", "")
         self.declare_parameter("replay_mode", "")
         self.declare_parameter("waypoint_threshold", 0.1)
+        # Global-planner grid: inflation, cell size and the smallest obstacle it sees (`global_plan_segments`).
+        self.declare_parameter("global_planner_inflation", 0.38)
+        self.declare_parameter("global_planner_resolution", 0.2)
+        self.declare_parameter("global_planner_min_obstacle_extent", 0.0)
+        self.declare_parameter("global_planner_thin_inflation", 0.0)
         self.declare_parameter("min_speed_for_heading", 0.1)
         self.declare_parameter("arrival_r_enter", 0.15)
         self.declare_parameter("arrival_r_exit", 0.30)
@@ -308,8 +334,19 @@ class AgentManager(Node):
             self._perception_cache[default_name] = perception_cls(occluder=self._occluder)
         else:
             self._perception_cache[default_name] = perception_cls()
+        gp_kwargs = {
+            "inflation_radius": float(self.get_parameter("global_planner_inflation").value),
+            "resolution": float(self.get_parameter("global_planner_resolution").value),
+            "thin_inflation": float(self.get_parameter("global_planner_thin_inflation").value),
+        }
+        import inspect  # noqa: PLC0415
+
+        accepted = inspect.signature(GlobalPlanner.get_class(self._module_selections["global_planner"]).__init__).parameters
+        gp_kwargs = {k: v for k, v in gp_kwargs.items() if k in accepted}
+        self._gp_min_obstacle_extent = float(self.get_parameter("global_planner_min_obstacle_extent").value)
         self._global_planner = GlobalPlanner.create(
             self._module_selections["global_planner"],
+            **gp_kwargs,
         )
         self._local_planner = LocalPlanner.create(
             self._module_selections["local_planner"],
@@ -391,6 +428,7 @@ class AgentManager(Node):
         self._pending_scenario_spawns: deque[tuple[int, AgentStateMsg]] = deque()
         self._pending_stimuli: deque[tuple[int, int, str, float]] = deque()
         self._agent_states_pool = _AgentStateMsgPool()
+        self._roster_empty_logged = False
         self._tick_phases: dict[str, float] = {}
         self._overrun_count: int = 0
         self._last_overrun_log: float = 0.0
@@ -818,7 +856,6 @@ class AgentManager(Node):
         agent_msg: AgentStateMsg,
         waypoints: Iterable[Pose2D],
     ) -> BaseAgent:
-        import attrs
 
         type_name = agent_msg.agent_type or "adult"
 
@@ -860,6 +897,16 @@ class AgentManager(Node):
             )
             agent = create_agent(params, state, self._module_pool, self._module_selections)
 
+        self._apply_agent_overrides(agent, agent_msg)
+        agent.movement = WaypointMovement(waypoints=waypoints)
+        return agent
+
+    @staticmethod
+    def _apply_agent_overrides(agent: BaseAgent, agent_msg: AgentStateMsg) -> bool:
+        """Apply the per-agent fields of an `AgentState` message (0.0 = keep) to `agent`'s
+        parameters and state. Returns whether anything changed."""
+        import attrs
+
         overrides = {}
         if agent_msg.radius > 0.0:
             overrides["agent_radius"] = agent_msg.radius
@@ -868,6 +915,8 @@ class AgentManager(Node):
         vel_val = agent_msg.desired_velocity
         if vel_val > 0.0:
             overrides["desired_velocity"] = vel_val
+        if getattr(agent_msg, "max_velocity", 0.0) > 0.0:
+            overrides["max_velocity"] = float(agent_msg.max_velocity)
 
         perception_overrides = {}
         for field_name in ("vision_range", "vision_fov"):
@@ -892,9 +941,7 @@ class AgentManager(Node):
             agent.params = attrs.evolve(agent.params, **overrides)
             if "desired_velocity" in overrides:
                 agent.state.desired_velocity = overrides["desired_velocity"]
-
-        agent.movement = WaypointMovement(waypoints=waypoints)
-        return agent
+        return bool(overrides)
 
     def _build_base_agent_from_spawn(
         self,
@@ -958,15 +1005,19 @@ class AgentManager(Node):
             agent.movement = BehaviorTreeMovement()
 
     def _remove_agent(self, aid: int) -> None:
-        self._agents.pop(aid, None)
-        self._prone.discard(aid)
-        self._parked_from.pop(aid, None)
+        # Pool first, agent map last: a tick that lands in between sees an agent that is still
+        # in the map, never a pool id without an agent.
         if aid in self._pool._id_to_idx:
             idx = self._pool._id_to_idx[aid]
             swapped_id = self._pool.swap_remove(aid)
             if swapped_id is not None:
                 self._pool_agent_ids[idx] = swapped_id
             self._pool_agent_ids.pop()
+        elif aid in self._pool_agent_ids:
+            self._pool_agent_ids.remove(aid)
+        self._agents.pop(aid, None)
+        self._prone.discard(aid)
+        self._parked_from.pop(aid, None)
         self._high_level_cmds.pop(aid, None)
         self._behavior_trees.pop(aid, None)
         self._robot_service_advertiser.unregister(aid)
@@ -1089,6 +1140,10 @@ class AgentManager(Node):
 
         world_state = self._consume_world_state()
 
+        if any(aid not in self._agents for aid in self._pool_agent_ids):
+            # The service callback and this timer can interleave mid-removal; skip the tick.
+            self._logger.debug("tick skipped: agent removal in progress")
+            return
         agents = [self._agents[aid] for aid in self._pool_agent_ids]
         pool = self._pool
         is_bt_tick = self._tick_count % self._bt_tick_interval == 0
@@ -1123,8 +1178,13 @@ class AgentManager(Node):
 
             for agent_id in self._pool_agent_ids:
                 bt = self._behavior_trees.get(agent_id)
-                if bt is not None:
-                    bt.tick()
+                if bt is None:
+                    continue
+                agent = self._agents.get(agent_id)
+                if agent is not None and isinstance(agent.movement, WaypointMovement):
+                    # an effect put this agent on the waypoint driver; park its tree until the movement is back
+                    continue
+                bt.tick()
 
             for agent_id, agent in self._agents.items():
                 mv = agent.movement
@@ -1316,9 +1376,11 @@ class AgentManager(Node):
                 self._world_knowledge._objects,
                 self._obstacles,
             )
+            # What each agent perceives (vision cones, proximity discs) is part of the basic
+            # picture, not planner debugging: level 1 keeps it, level 2 adds plans and forces.
+            publish_perception(self._marker_pub, agents)
             if mlvl >= 2:
                 velocities = {int(pool.agent_ids[i]): (float(pool.vel[i, 0]), float(pool.vel[i, 1])) for i in range(n)}
-                publish_perception(self._marker_pub, agents)
                 publish_global_plan(
                     self._marker_pub,
                     agents,
@@ -1544,6 +1606,8 @@ class AgentManager(Node):
                 idx = int(self._waypoint_rng.choice(others))
 
             mv.index = idx
+            # The latch belongs to the waypoint just reached; clear it so the next decision tick re-evaluates it.
+            pool.latched[i] = False
             aid = agent.state.agent_id
             self._high_level_cmds[aid] = HighLevelCommand(
                 agent_id=aid,
@@ -1934,7 +1998,14 @@ class AgentManager(Node):
             msg.header.stamp.sec = int(self._sim_time_ns // int(1e9))
             msg.header.stamp.nanosec = int(self._sim_time_ns % int(1e9))
         if not own_idxs:
+            # Log once when the roster goes empty while the pool still holds agents.
+            if n and not self._roster_empty_logged:
+                self._roster_empty_logged = True
+                self._logger.warning(f"agent_states roster EMPTY while the pool holds {n} agent(s) ({len(external)} external)")
             return msg
+        if self._roster_empty_logged:
+            self._roster_empty_logged = False
+            self._logger.info(f"agent_states roster restored: {len(own_idxs)} agent(s)")
         names: dict[int, str] = {}
         for name, aid in self._agent_name_to_id.items():
             names.setdefault(aid, name)
@@ -2000,6 +2071,8 @@ class AgentManager(Node):
 
             agent = self._build_base_agent(aid, agent_msg, waypoints)
             agent.state.kind = kind
+            if kind == 0:
+                self._snap_spawn(agent)
             agent.movement = WaypointMovement(
                 waypoints=waypoints,
                 radii=radii,
@@ -2044,6 +2117,16 @@ class AgentManager(Node):
         response.spawned_ids = spawned_ids
         self._logger.info(response.message)
         return response
+
+    def _snap_spawn(self, agent: BaseAgent) -> None:
+        """Move a spawn that lands inside furniture to the nearest cell with room for the body."""
+        pose = agent.state.pose
+        snapped = agent.global_planner.snap_spawn(pose, float(agent.params.agent_radius))
+        if snapped is pose or (snapped.x == pose.x and snapped.y == pose.y):
+            return
+        moved = math.hypot(snapped.x - pose.x, snapped.y - pose.y)
+        self._logger.warning(f"agent {agent.state.agent_id} spawn ({pose.x:.2f}, {pose.y:.2f}) is inside an obstacle; moved {moved:.2f} m to ({snapped.x:.2f}, {snapped.y:.2f})")
+        agent.state.pose = snapped
 
     def _remove_agents_callback(
         self,
@@ -2331,8 +2414,21 @@ class AgentManager(Node):
     def _refresh_planners(self):
         """Push current wall segments to local planner, global planner, and collision."""
         segments = self._all_wall_segments()
+        split = global_plan_segments(self._walls.values(), self._obstacles.values(), self._gp_min_obstacle_extent) if self._gp_min_obstacle_extent > 0.0 else None
         for subsystem in self._wall_aware:
-            subsystem.set_walls(segments)
+            if split is not None and subsystem is self._global_planner:
+                full, thin = split
+                if getattr(subsystem, "supports_thin_segments", False):
+                    subsystem.set_walls(full, thin_segments=thin, fallback_segments=list(self._walls.values()))
+                else:
+                    # a planner without the two-pass grid (dijkstra) sees every segment inflated
+                    subsystem.set_walls([*full, *thin])
+            elif split is not None and subsystem in (self._collision, self._local_planner):
+                # Small furniture is soft for the local planner and the collision resolver:
+                # the global plan routes round it, and a doorway chair is nudged aside.
+                subsystem.set_walls(split[0])
+            else:
+                subsystem.set_walls(segments)
 
     def _publish_world_geometry(self) -> None:
         msg = WorldGeometryMsg()

@@ -78,7 +78,7 @@ Types support inheritance via `extends`. Parameters are sampled per-agent from t
 
 Agents can operate in two movement modes:
 
-- **Waypoint** — follow an explicit waypoint list (repeat / reverse / once / random)
+- **Waypoint** — follow an explicit waypoint list (repeat / reverse / once / random). A waypoint counts as reached within `waypoint_threshold` or when the arrival latch (`arrival_r_enter`) has closed on it; the advance clears that latch, since the latch is only re-evaluated on decision ticks (`bt_tick_interval`) while the advance runs every tick - left set, a repeat walker cycled its whole route once per tick and stood still (2026-08-28). Spawns inside furniture and waypoints in pockets the inflation seals off are moved to reachable cells, see `arena_humansim/global_planner/README.md`.
 - **Behavior Tree** — py_trees decision tree driven by needs, perceptions, and events
 
 BTs are compiled from the agent type's `sequences`, `actions`, and `needs`. Needs decay over time and trigger actions when thresholds are crossed (e.g. hunger < 30 → eat).
@@ -162,7 +162,7 @@ Config format and stage semantics: [`config/benchmark/README.md`](arena_humansim
 | `animation` | `noop` | Animation module |
 | `collision` | `wall_projection` | Collision resolver |
 | `occlusion` | `bitmap` | Occlusion module |
-| `publish_markers` | `0` | RViz markers: 0=off, 1=infrastructure+labels+interactions, 2=full |
+| `publish_markers` | `0` | RViz markers: 0=off, 1=bodies, labels, interactions, walls/objects and each agent's vision cone, 2=full (adds global/local plans, waypoints, forces) |
 | `log_dir` | `""` | Directory for replay logs |
 
 ### ROS Interface
@@ -175,7 +175,7 @@ Config format and stage semantics: [`config/benchmark/README.md`](arena_humansim
 - `/clock` (subsystem mode) drives the tick: every message runs the ticks its sim time has covered since the epoch, so a held clock cannot starve the engine
 
 **Services:**
-- `spawn_agents`, `remove_agents` — direct agent control
+- `spawn_agents`, `remove_agents`, `update_agents` — direct agent control (`update_agents` changes a live agent's parameters - speed, cap, radius, vision, social-force terms, or a whole `agent_type` - in place, no respawn)
 - `add_source`, `remove_source`, `add_sink`, `remove_sink` — flow control
 - `add_walls`, `remove_walls` — dynamic obstacles
 - `set_flow` — bulk configure sources, sinks, walls

@@ -15,6 +15,7 @@ float64 vision_fov           # 0.0 = use global default
 float64 relaxation_time      # 0.0 = use global default
 float64 repulsion_strength   # 0.0 = use global default
 float64 repulsion_range      # 0.0 = use global default
+float64 max_velocity         # 0.0 = the agent type's own cap (the engine clamps speed to it)
 string agent_type            # empty = use global default
 
 arena_humansim_msgs/Waypoints waypoints

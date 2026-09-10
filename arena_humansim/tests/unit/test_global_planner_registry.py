@@ -4,7 +4,6 @@ import inspect
 
 import numpy as np
 import pytest
-
 from arena_humansim.core.agents.types import AgentType
 from arena_humansim.global_planner import (
     GlobalPlanner,
@@ -121,3 +120,11 @@ def test_default_inflation_radius_covers_default_agent_radius(planner_cls: type)
     inflation_default = inspect.signature(planner_cls.__init__).parameters["inflation_radius"].default
     agent_radius_default = AgentType(name="default").agent_radius.mean
     assert inflation_default > agent_radius_default, f"{planner_cls.__name__} default inflation_radius={inflation_default} must be > default agent_radius={agent_radius_default}; otherwise planned paths can hug walls closer than a pedestrian can fit"
+
+
+def test_advance_along_path_reaches_a_waypoint_it_stands_beside() -> None:
+    # An agent held 8 cm short of a waypoint (wall repulsion vs attraction) must not stall on it.
+    waypoints = [Pose2D(x=0.0, y=0.0), Pose2D(x=1.0, y=0.0), Pose2D(x=1.0, y=2.0)]
+    assert GlobalPlanner.advance_along_path(Pose2D(x=0.92, y=0.0), waypoints, 0) == 1
+    assert GlobalPlanner.advance_along_path(Pose2D(x=0.5, y=0.0), waypoints, 0) == 0
+    assert GlobalPlanner.advance_along_path(Pose2D(x=0.92, y=0.0), waypoints, 0, reach=0.05) == 0
