@@ -215,7 +215,7 @@ Re-seating moves every live agent that follows the defaults onto the current loc
 - `/clock` (subsystem mode) drives the tick: every message runs the ticks its sim time has covered since the epoch, so a held clock cannot starve the engine
 
 **Services:**
-- `spawn_agents`, `remove_agents` — direct agent control
+- `spawn_agents`, `remove_agents`, `update_agents` — direct agent control (`update_agents` changes a live agent's parameters - speed, cap, radius, vision, social-force terms, or a whole `agent_type` - in place, no respawn)
 - `add_source`, `remove_source`, `add_sink`, `remove_sink` — flow control
 - `add_walls`, `remove_walls` — dynamic obstacles
 - `set_flow` — bulk configure sources, sinks, walls
