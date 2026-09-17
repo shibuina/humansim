@@ -109,10 +109,10 @@ class RosTestSystem:
             pass
 
 
-def make_system(client_node_name: str = "ros_test_client") -> RosTestSystem:
+def make_system(client_node_name: str = "ros_test_client", **node_kwargs: Any) -> RosTestSystem:
     from arena_humansim.core.agent_manager import AgentManager
 
-    manager = AgentManager()
+    manager = AgentManager(**node_kwargs)
     if manager._timer is not None:
         manager._timer.cancel()
     client_node = Node(client_node_name)

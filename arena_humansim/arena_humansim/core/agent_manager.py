@@ -205,8 +205,8 @@ class AgentManager(Node):
     MODE_MASTER = "master"
     MODE_SUBSYSTEM = "subsystem"
 
-    def __init__(self):
-        super().__init__("arena_humansim")
+    def __init__(self, **node_kwargs: Any) -> None:
+        super().__init__("arena_humansim", **node_kwargs)
         self._logger = self.get_logger()
         Loggable.init_logging(self)
 
@@ -235,6 +235,8 @@ class AgentManager(Node):
         self.declare_parameter("profile_phases", False)
         self.declare_parameter("profile_interval", 0)
         self.declare_parameter("record_bag", False)
+        self.declare_parameter("strict_recording", True)
+        self.declare_parameter("trial_id", "")
         self.declare_parameter("record_dir", "")
         self.declare_parameter("scenario", "")
         self.declare_parameter("ticks", 0)
@@ -266,6 +268,7 @@ class AgentManager(Node):
         self._subsystem_overrun_policy = str(self.get_parameter("subsystem_overrun_policy").value)
         self._force_local_planner = bool(self.get_parameter("force_local_planner").value)
         self._robot_policy_override = str(self.get_parameter("robot_policy").value)
+        self._trial_id = str(self.get_parameter("trial_id").value)
         self._robot_shutdown_override = str(self.get_parameter("robot_shutdown").value).strip().lower()
         self._robot_shutdown = False  # resolved against scenario.simulation.robot_shutdown after load
         fwm_raw = str(self.get_parameter("force_waypoint_mode").value).strip().lower()
@@ -550,7 +553,18 @@ class AgentManager(Node):
                 target = default_record_dir()
             else:
                 target = Path(record_dir)
-            self._recorder = BagRecorder(self, target)
+            self._recorder = BagRecorder(
+                self,
+                target,
+                strict=bool(self.get_parameter("strict_recording").value),
+                on_contamination=self._abort_contaminated,
+                provenance={
+                    "trial_id": self._trial_id,
+                    "seed": int(seed),
+                    "local_planner": self._module_selections["local_planner"],
+                    "robot_policy": self._robot_policy_override,
+                },
+            )
 
         scenario_arg = self.get_parameter("scenario").value
         if scenario_arg and self._mode == self.MODE_MASTER:
@@ -581,6 +595,15 @@ class AgentManager(Node):
                 pass
         return params
 
+    def _attach_policy(self, planner: LocalPlanner) -> None:
+        """Wire a planner created after __init__ into the pool and the walls."""
+        agents = [self._agents[aid] for aid in self._pool_agent_ids if aid in self._agents]
+        self._pool.attach_late(planner, agents)
+        self._wall_aware = (*self._wall_aware, planner)
+        segments = self._all_wall_segments()
+        if segments:
+            planner.set_walls(segments)
+
     def _resolve_policy_idx(self, name: str) -> int:
         if not name:
             return -1
@@ -588,6 +611,7 @@ class AgentManager(Node):
         if idx is not None:
             return idx
         planner = LocalPlanner.create(name)
+        self._attach_policy(planner)
         idx = len(self._policies)
         self._policies.append(planner)
         self._policy_names.append(name)
@@ -2520,6 +2544,12 @@ class AgentManager(Node):
         response.success = True
         self._logger.debug(response.message)
         return response
+
+    def _abort_contaminated(self, counts: dict[str, int]) -> None:
+        self._logger.error(f"strict_recording: aborting trial {self._trial_id or '<unnamed>'}, publisher counts {counts}")
+        if self._timer is not None:
+            self._timer.cancel()
+        rclpy.try_shutdown()
 
     def destroy_node(self):
         if self._timer is not None:

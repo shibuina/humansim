@@ -46,6 +46,7 @@ class AgentPool:
         self.n: int = 0
         self._id_to_idx: dict[int, int] = {}
         self._extensions: list[PoolAware] = []
+        self._late_attach: bool = False
 
         self.agent_ids = np.zeros(capacity, dtype=np.int32)
         self.pos = np.zeros((capacity, 2), dtype=np.float64)
@@ -82,8 +83,22 @@ class AgentPool:
         self.neighbor_indices = np.empty(0, dtype=np.int32)
 
     def register_extension(self, ext: PoolAware) -> None:
-        assert self.n == 0, "register_extension must be called before agents are added"
+        assert self.n == 0 or self._late_attach, "register_extension must be called before agents are added"
         self._extensions.append(ext)
+
+    def attach_late(self, ext: PoolAware, agents: Iterable[BaseAgent]) -> None:
+        """Attach a PoolAware after agents exist and back-fill its rows for every pooled agent."""
+        self._late_attach = True
+        try:
+            ext.attach(self)
+        finally:
+            self._late_attach = False
+        if ext not in self._extensions:
+            return
+        for i, agent in enumerate(agents):
+            if i >= self.n:
+                break
+            ext.on_pool_add(i, agent)
 
     def idx(self, agent_id: int) -> int:
         return self._id_to_idx[agent_id]
