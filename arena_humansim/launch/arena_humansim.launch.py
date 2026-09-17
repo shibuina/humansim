@@ -107,7 +107,9 @@ def generate_launch_description():
              "animation": LaunchConfiguration("animation"),
              "collision": LaunchConfiguration("collision"),
              "occlusion": LaunchConfiguration("occlusion"),
-             "seed": LaunchConfiguration("seed")}
+             "seed": LaunchConfiguration("seed"),
+             "strict_recording": ParameterValue(LaunchConfiguration("strict_recording"), value_type=bool),
+             "trial_id": ParameterValue(LaunchConfiguration("trial_id"), value_type=str)}
         ],
         output="screen",
     )
@@ -150,6 +152,8 @@ def generate_launch_description():
         DeclareLaunchArgument("collision", default_value="wall_projection", description="collision resolver module"),
         DeclareLaunchArgument("occlusion", default_value="bitmap", description="occlusion module"),
         DeclareLaunchArgument("seed", default_value="0", description="Random seed for the simulation RNG"),
+        DeclareLaunchArgument("strict_recording", default_value="true", description="abort the trial when a second publisher appears on a contract topic"),
+        DeclareLaunchArgument("trial_id", default_value="", description="opaque id written into the recording manifest (the sweep passes the trial dir name)"),
         OpaqueFunction(function=_compute_record_dir, kwargs={"plan": renderer_plan}),
         map_tf,
         node,
