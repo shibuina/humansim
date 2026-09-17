@@ -581,6 +581,15 @@ class AgentManager(Node):
                 pass
         return params
 
+    def _attach_policy(self, planner: LocalPlanner) -> None:
+        """Wire a planner created after __init__ into the pool and the walls."""
+        agents = [self._agents[aid] for aid in self._pool_agent_ids if aid in self._agents]
+        self._pool.attach_late(planner, agents)
+        self._wall_aware = (*self._wall_aware, planner)
+        segments = self._all_wall_segments()
+        if segments:
+            planner.set_walls(segments)
+
     def _resolve_policy_idx(self, name: str) -> int:
         if not name:
             return -1
@@ -588,6 +597,7 @@ class AgentManager(Node):
         if idx is not None:
             return idx
         planner = LocalPlanner.create(name)
+        self._attach_policy(planner)
         idx = len(self._policies)
         self._policies.append(planner)
         self._policy_names.append(name)

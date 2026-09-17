@@ -86,12 +86,18 @@ class SFMPlanner(LocalPlanner):
         self._repulsion_range = _resize_1d(self._repulsion_range, new_capacity, old_capacity)
         self._anisotropy = _resize_1d(self._anisotropy, new_capacity, old_capacity)
 
+    def _param(self, lp: dict, key: str) -> float:
+        try:
+            return float(lp[key])
+        except (KeyError, TypeError):
+            return float(self.PARAM_DEFAULTS[key].mean)
+
     def on_pool_add(self, idx: int, agent: BaseAgent) -> None:
         lp = agent.params.local_planner_params
-        self._relaxation_time[idx] = lp["relaxation_time"]
-        self._repulsion_strength[idx] = lp["repulsion_strength"]
-        self._repulsion_range[idx] = lp["repulsion_range"]
-        self._anisotropy[idx] = lp["anisotropy"]
+        self._relaxation_time[idx] = self._param(lp, "relaxation_time")
+        self._repulsion_strength[idx] = self._param(lp, "repulsion_strength")
+        self._repulsion_range[idx] = self._param(lp, "repulsion_range")
+        self._anisotropy[idx] = self._param(lp, "anisotropy")
 
     def on_pool_swap(self, idx: int, last: int) -> None:
         self._relaxation_time[idx] = self._relaxation_time[last]
@@ -153,6 +159,12 @@ class SFMPlanner(LocalPlanner):
         rep_str = self._repulsion_strength[:n]
         rep_rng = self._repulsion_range[:n]
         radii = pool.agent_radius[:n]
+
+        if relax.shape[0] != n:
+            raise RuntimeError(
+                f"{type(self).__name__}: parameter arrays hold {relax.shape[0]} rows for {n} pooled agents, "
+                "this planner was never attached to the pool (AgentPool.attach_late)"
+            )
 
         d_goal = goal - pos
         dist_goal = np.hypot(d_goal[:, 0], d_goal[:, 1])[:, None]

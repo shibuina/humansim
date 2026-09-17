@@ -64,10 +64,10 @@ class HSFMPlanner(SFMPlanner):
     def on_pool_add(self, idx: int, agent: BaseAgent) -> None:
         super().on_pool_add(idx, agent)
         lp = agent.params.local_planner_params
-        self._lateral_gain[idx] = lp["lateral_gain"]
-        self._lateral_damping[idx] = lp["lateral_damping"]
-        self._angular_gain[idx] = lp["angular_gain"]
-        self._angular_damping[idx] = lp["angular_damping"]
+        self._lateral_gain[idx] = self._param(lp, "lateral_gain")
+        self._lateral_damping[idx] = self._param(lp, "lateral_damping")
+        self._angular_gain[idx] = self._param(lp, "angular_gain")
+        self._angular_damping[idx] = self._param(lp, "angular_damping")
 
     def on_pool_swap(self, idx: int, last: int) -> None:
         super().on_pool_swap(idx, last)
