@@ -76,6 +76,8 @@ def main() -> None:
         default="reverse",
         help="Override scenario waypoint_mode for every kind=human agent (robots untouched). Default 'reverse' keeps single-waypoint pedestrians cycling for the full sim_duration instead of freezing at the goal. Pass '' to use scenario values.",
     )
+    parser.add_argument("--trial_timeout_factor", type=float, default=3.0, help="kill a trial after factor x sim_duration seconds of wall clock (0 disables).")
+    parser.add_argument("--prune", action="store_true", help="delete <trial>/bag after extraction unless the trial failed the integrity gate or falls in the deterministic 5%% keep sample.")
     args = parser.parse_args()
 
     if args.robot_policies is None:
@@ -221,6 +223,9 @@ def main() -> None:
                 cmd.extend(["--robot_shutdown", "true"])
             if args.force_waypoint_mode:
                 cmd.extend(["--force_waypoint_mode", args.force_waypoint_mode])
+            cmd.extend(["--trial_timeout_factor", str(args.trial_timeout_factor)])
+            if args.prune:
+                cmd.append("--prune")
 
             logf = open(log_file, "wb")
             log_files.append(logf)
