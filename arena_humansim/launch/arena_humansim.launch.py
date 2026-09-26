@@ -82,7 +82,7 @@ def _renderer_action(context, *args, plan=None, **kwargs):
 
 
 def _node_actions(context, *args, declared=frozenset(), plan=None, **kwargs):
-    forwarded = {name: ParameterValue(LaunchConfiguration(name)) for name in context.launch_configurations if name not in declared and not name.startswith("_")}
+    forwarded = {name: ParameterValue(LaunchConfiguration(name)) for name in context.launch_configurations if name not in declared and name != "ros_remaps" and not name.startswith("_")}
     node = Node(
         package="arena_humansim",
         executable="arena_humansim_node",
