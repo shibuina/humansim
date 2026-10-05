@@ -151,10 +151,6 @@ class GlobalPlanner(PoolAware, WallAware, Loggable, ABC):
     def get_cached_paths(self) -> dict[int, list[Pose2D]]:
         return {aid: wps for aid, (_, wps, _, _) in self._path_cache.items()}
 
-    def invalidate_paths(self, agent_ids: Iterable[int]) -> None:
-        for aid in agent_ids:
-            self._path_cache.pop(aid, None)
-
     def _forget_paths(self) -> None:
         self._path_cache.clear()
 

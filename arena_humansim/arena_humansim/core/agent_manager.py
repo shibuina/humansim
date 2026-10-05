@@ -1546,9 +1546,7 @@ class AgentManager(Node):
         self._phase_end("integrate", t0)
 
         t0 = time.perf_counter()
-        corrected = self._collision.resolve(pool)
-        if corrected:
-            self._global_planner.invalidate_paths(corrected)
+        self._collision.resolve(pool)
         self._park_seated(pool)
         self._phase_end("collision", t0)
 
