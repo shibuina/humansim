@@ -1,14 +1,17 @@
 from __future__ import annotations
 
 import json
+import math
 from collections.abc import Sequence
 from typing import TYPE_CHECKING, ClassVar
 
 import numpy as np
+from numba import njit, prange
 
 from arena_humansim.core.agents import BaseAgent
 from arena_humansim.core.agents.types import ParamDist
 from arena_humansim.utils.types import Pose2D, Segments
+from arena_humansim.utils.wall_grid import WallGrid, query_walls
 
 from . import LocalPlanner
 
@@ -30,11 +33,62 @@ _N_KINDS = 2
 _DEFAULT_ROBOT_STRENGTH_SCALE = 1.5
 _DEFAULT_ROBOT_RANGE_SCALE = 1.3
 
+_WALL_CUTOFF_RANGES = 28.0
+_WALL_QUERY_CAPACITY = 64
+
 
 def _resize_1d(arr: np.ndarray, new_capacity: int, old_capacity: int) -> np.ndarray:
     out = np.zeros(new_capacity, dtype=arr.dtype)
     out[:old_capacity] = arr[:old_capacity]
     return out
+
+
+@njit(cache=True, parallel=True)
+def _wall_forces_kernel(
+    pos: np.ndarray,
+    radius: np.ndarray,
+    p1: np.ndarray,
+    d: np.ndarray,
+    len_sq: np.ndarray,
+    cell_start: np.ndarray,
+    cell_walls: np.ndarray,
+    wall_cx0: np.ndarray,
+    wall_cy0: np.ndarray,
+    origin_x: float,
+    origin_y: float,
+    cell: float,
+    nx: int,
+    ny: int,
+    strength: float,
+    rng: float,
+    out: np.ndarray,
+) -> None:
+    for i in prange(pos.shape[0]):
+        x = pos[i, 0]
+        y = pos[i, 1]
+        r = radius[i]
+        query_r = r + rng * _WALL_CUTOFF_RANGES
+        buf = np.empty(_WALL_QUERY_CAPACITY, dtype=np.int64)
+        k = query_walls(cell_start, cell_walls, wall_cx0, wall_cy0, origin_x, origin_y, cell, nx, ny, x, y, query_r, buf)
+        if k > buf.shape[0]:
+            buf = np.empty(k, dtype=np.int64)
+            k = query_walls(cell_start, cell_walls, wall_cx0, wall_cy0, origin_x, origin_y, cell, nx, ny, x, y, query_r, buf)
+        fx = 0.0
+        fy = 0.0
+        for c in range(k):
+            w = buf[c]
+            dx = d[w, 0]
+            dy = d[w, 1]
+            t = ((x - p1[w, 0]) * dx + (y - p1[w, 1]) * dy) / max(len_sq[w], _EPS)
+            t = min(max(t, 0.0), 1.0)
+            ox = x - (p1[w, 0] + t * dx)
+            oy = y - (p1[w, 1] + t * dy)
+            dist = max(math.hypot(ox, oy), _EPS)
+            mag = strength * math.exp((r - dist) / rng)
+            fx += mag * (ox / dist)
+            fy += mag * (oy / dist)
+        out[i, 0] = fx
+        out[i, 1] = fy
 
 
 class SFMPlanner(LocalPlanner):
@@ -56,6 +110,10 @@ class SFMPlanner(LocalPlanner):
         self.wall_repulsion_range = wall_repulsion_range
         self._wall_segments: Segments = []
         self._wall_segments_np: np.ndarray = np.empty((0, 2, 2), dtype=np.float64)
+        self._wall_p1: np.ndarray = np.empty((0, 2), dtype=np.float64)
+        self._wall_d: np.ndarray = np.empty((0, 2), dtype=np.float64)
+        self._wall_len_sq: np.ndarray = np.empty(0, dtype=np.float64)
+        self._wall_grid = WallGrid(np.empty((0, 4), dtype=np.float64))
         self._last_forces: dict[int, tuple[tuple[float, float], tuple[float, float], tuple[float, float]]] = {}
         self._last_force_arrays: tuple | None = None
         self._last_agents: Sequence[BaseAgent] | None = None
@@ -69,6 +127,36 @@ class SFMPlanner(LocalPlanner):
         self._repulsion_strength = np.zeros(0, dtype=np.float64)
         self._repulsion_range = np.zeros(0, dtype=np.float64)
         self._anisotropy = np.zeros(0, dtype=np.float64)
+        self._warmup()
+
+    def _warmup(self) -> None:
+        grid = WallGrid(np.array([[0.0, 0.0, 1.0, 0.0]]))
+        p1 = np.ascontiguousarray(grid.segments[:, :2])
+        d = np.ascontiguousarray(grid.segments[:, 2:] - p1)
+        self._run_wall_kernel(np.zeros((1, 2), dtype=np.float64), np.full(1, 0.3), grid, p1, d, np.sum(d**2, axis=1))
+
+    def _run_wall_kernel(self, pos: np.ndarray, radius: np.ndarray, grid: WallGrid, p1: np.ndarray, d: np.ndarray, len_sq: np.ndarray) -> np.ndarray:
+        out = np.empty((pos.shape[0], 2), dtype=np.float64)
+        _wall_forces_kernel(
+            np.ascontiguousarray(pos, dtype=np.float64),
+            np.ascontiguousarray(radius, dtype=np.float64),
+            p1,
+            d,
+            len_sq,
+            grid.cell_start,
+            grid.cell_walls,
+            grid.wall_cx0,
+            grid.wall_cy0,
+            grid.origin_x,
+            grid.origin_y,
+            grid.cell,
+            grid.nx,
+            grid.ny,
+            float(self.wall_repulsion_strength),
+            float(self.wall_repulsion_range),
+            out,
+        )
+        return out
 
     def attach(self, pool: AgentPool) -> None:
         self._allocate_soa(pool.capacity)
@@ -142,9 +230,10 @@ class SFMPlanner(LocalPlanner):
             self._wall_segments_np = np.array(segments, dtype=np.float64).reshape(-1, 2, 2)
         else:
             self._wall_segments_np = np.empty((0, 2, 2), dtype=np.float64)
-        self._wall_p1 = self._wall_segments_np[:, 0, :]
-        self._wall_d = self._wall_segments_np[:, 1, :] - self._wall_p1
+        self._wall_p1 = np.ascontiguousarray(self._wall_segments_np[:, 0, :])
+        self._wall_d = np.ascontiguousarray(self._wall_segments_np[:, 1, :] - self._wall_p1)
         self._wall_len_sq = np.sum(self._wall_d**2, axis=1)
+        self._wall_grid = WallGrid(self._wall_segments_np.reshape(-1, 4))
         self._logger.info(f"Loaded {len(segments)} wall segment(s)")
 
     def _compute_forces_pool(self, pool: AgentPool) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
@@ -258,26 +347,7 @@ class SFMPlanner(LocalPlanner):
         if self._wall_segments_np.shape[0] == 0:
             return np.zeros((n, 2), dtype=np.float64)
 
-        seg_p1 = self._wall_p1
-        seg_d = self._wall_d
-        seg_len_sq = self._wall_len_sq
-
-        ap = agent_pos[:, None, :]
-        diff_to_p1 = ap - seg_p1[None, :, :]
-
-        t = np.sum(diff_to_p1 * seg_d[None, :, :], axis=2) / np.maximum(seg_len_sq[None, :], _EPS)
-        t = np.clip(t, 0.0, 1.0)
-
-        cp = seg_p1[None, :, :] + t[:, :, None] * seg_d[None, :, :]
-        diff = ap - cp
-        dist = np.hypot(diff[:, :, 0], diff[:, :, 1])
-        dist = np.maximum(dist, _EPS)
-        normals = diff / dist[:, :, None]
-
-        mag = self.wall_repulsion_strength * np.exp((agent_radius[:, None] - dist) / self.wall_repulsion_range)
-
-        forces = mag[:, :, None] * normals
-        return forces.sum(axis=1)
+        return self._run_wall_kernel(agent_pos, agent_radius, self._wall_grid, self._wall_p1, self._wall_d, self._wall_len_sq)
 
     def _compute_forces_scalar(
         self,

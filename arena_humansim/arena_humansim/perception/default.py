@@ -74,40 +74,31 @@ class DefaultPerception(Perception):
         vision_range = pool.vision_range[:n]
         mask = dists <= vision_range[:, None]
 
-        vision_fov = pool.vision_fov[:n]
-        if not np.all(vision_fov >= 360.0):
-            needs_fov = vision_fov < 360.0
-            if np.any(needs_fov):
-                heading = pool.theta[:n]
-                bearing = np.arctan2(diff[:, :, 1], diff[:, :, 0])
-                angle_diff = bearing - heading[:, None]
-                angle_diff = np.abs(np.arctan2(np.sin(angle_diff), np.cos(angle_diff)))
-                half_fov = np.radians(vision_fov * 0.5)
-                fov_mask = angle_diff <= half_fov[:, None]
-                fov_mask[~needs_fov, :] = True
-                mask &= fov_mask
-
         proximity_sense = pool.proximity_sense[:n]
-        if np.any(proximity_sense > 0.0):
-            prox_mask = dists <= proximity_sense[:, None]
+        prox_mask = dists <= proximity_sense[:, None] if np.any(proximity_sense > 0.0) else None
+
+        vision_fov = pool.vision_fov[:n]
+        needs_fov = vision_fov < 360.0
+        if np.any(needs_fov):
+            fov_pairs = mask & needs_fov[:, None]
+            if prox_mask is not None:
+                fov_pairs &= ~prox_mask
+            r_fov, c_fov = np.nonzero(fov_pairs)
+            if len(r_fov) > 0:
+                heading = pool.theta[:n]
+                cos_half = np.cos(np.radians(vision_fov * 0.5))
+                dot = diff[r_fov, c_fov, 0] * np.cos(heading)[r_fov] + diff[r_fov, c_fov, 1] * np.sin(heading)[r_fov]
+                outside = dot < dists[r_fov, c_fov] * cos_half[r_fov]
+                mask[r_fov[outside], c_fov[outside]] = False
+
+        if prox_mask is not None:
             mask |= prox_mask
 
         if self._occluder is not None:
-            row, col = np.where(mask)
-            if len(row) > 0:
-                needs_los = pool.vision_occlusion[:n][row]
-                if np.any(needs_los):
-                    p_a = positions[row]
-                    p_b = positions[col]
-                    los = self._occluder.clear(p_a, p_b)
-                    # agents with vision_occlusion=False always pass; others require clear LOS
-                    los_ok = los | ~needs_los
-                    flat = np.ravel_multi_index((row, col), (n, n))
-                    flat_blocked = flat[~los_ok]
-                    if len(flat_blocked) > 0:
-                        mask_flat = mask.ravel()
-                        mask_flat[flat_blocked] = False
-                        mask = mask_flat.reshape(n, n)
+            r_los, c_los = np.nonzero(mask & pool.vision_occlusion[:n][:, None])
+            if len(r_los) > 0:
+                blocked = ~_clear_unordered(self._occluder, positions, r_los, c_los, n)
+                mask[r_los[blocked], c_los[blocked]] = False
 
         row, col = np.where(mask)
         if len(row) == 0:
@@ -147,36 +138,27 @@ class DefaultPerception(Perception):
 
         prox_ok = dist <= pool.proximity_sense[row]
         range_ok = dist <= pool.vision_range[row]
+        keep = range_ok | prox_ok
 
-        obs_fov = pool.vision_fov[row]
-        omni = obs_fov >= 360.0
-
-        fov_ok = np.ones(len(row), dtype=np.bool_)
-        needs_fov = ~omni
-        if np.any(needs_fov):
-            r_fov = row[needs_fov]
-            c_fov = col[needs_fov]
-
+        vision_fov = pool.vision_fov[:n]
+        fov_idx = np.flatnonzero(range_ok & ~prox_ok & (vision_fov[row] < 360.0))
+        if len(fov_idx) > 0:
+            heading = pool.theta[:n]
+            hx = np.cos(heading)
+            hy = np.sin(heading)
+            cos_half = np.cos(np.radians(vision_fov * 0.5))
+            r_fov = row[fov_idx]
+            c_fov = col[fov_idx]
             dx = positions[c_fov, 0] - positions[r_fov, 0]
             dy = positions[c_fov, 1] - positions[r_fov, 1]
-            bearing = np.arctan2(dy, dx)
-            heading = pool.theta[r_fov]
+            outside = dx * hx[r_fov] + dy * hy[r_fov] < dist[fov_idx] * cos_half[r_fov]
+            keep[fov_idx[outside]] = False
 
-            angle_diff = np.abs(np.arctan2(np.sin(bearing - heading), np.cos(bearing - heading)))
-            half_fov = np.radians(obs_fov[needs_fov] * 0.5)
-            fov_ok[needs_fov] = angle_diff <= half_fov
-
-        keep = (range_ok & fov_ok) | prox_ok
-
-        if self._occluder is not None and np.any(keep):
-            needs_los = pool.vision_occlusion[:n][row[keep]]
-            if np.any(needs_los):
-                p_a = positions[row[keep]]
-                p_b = positions[col[keep]]
-                los = self._occluder.clear(p_a, p_b)
-                los_ok = los | ~needs_los
-                keep_indices = np.where(keep)[0]
-                keep[keep_indices[~los_ok]] = False
+        if self._occluder is not None:
+            los_idx = np.flatnonzero(keep & pool.vision_occlusion[row])
+            if len(los_idx) > 0:
+                blocked = ~_clear_unordered(self._occluder, positions, row[los_idx], col[los_idx], n)
+                keep[los_idx[blocked]] = False
 
         row = row[keep]
         col = col[keep]
@@ -256,3 +238,10 @@ class DefaultPerception(Perception):
 
 def _wrap_angle(angle: float) -> float:
     return (angle + np.pi) % (2.0 * np.pi) - np.pi
+
+
+def _clear_unordered(occluder: Occluder, positions: np.ndarray, row: np.ndarray, col: np.ndarray, n: int) -> np.ndarray:
+    lo = np.minimum(row, col).astype(np.int64)
+    hi = np.maximum(row, col).astype(np.int64)
+    keys, inverse = np.unique(lo * n + hi, return_inverse=True)
+    return occluder.clear(positions[keys // n], positions[keys % n])[inverse]

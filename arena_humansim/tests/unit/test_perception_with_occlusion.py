@@ -8,9 +8,11 @@ import pytest
 from arena_humansim.core.agents.base import BaseAgent
 from arena_humansim.core.agents.types import SampledParams, SampledPerception
 from arena_humansim.core.pool import AgentPool
+from arena_humansim.occlusion import Occluder
 from arena_humansim.occlusion.bitmap import BitmapOccluder
 from arena_humansim.perception.default import DefaultPerception
-from arena_humansim.utils.types import AgentState, Pose2D
+from arena_humansim.utils.benchmark import generate_maze
+from arena_humansim.utils.types import AgentState, Pose2D, Segments
 
 
 # ---------------------------------------------------------------------------
@@ -354,3 +356,80 @@ def test_same_side_wall_visible_kdtree(monkeypatch: pytest.MonkeyPatch) -> None:
 
     assert 1 in _neighbors(pool, 0)
     assert 0 in _neighbors(pool, 1)
+
+
+class _RecordingOccluder(Occluder):
+    def __init__(self, inner: BitmapOccluder) -> None:
+        self._inner = inner
+        self.calls: list[tuple[tuple[float, float], tuple[float, float], bool]] = []
+
+    def set_walls(self, segments: Segments) -> None:
+        self._inner.set_walls(segments)
+
+    def clear(self, p_a: np.ndarray, p_b: np.ndarray) -> np.ndarray:
+        result = self._inner.clear(p_a, p_b)
+        for a, b, ok in zip(p_a, p_b, result, strict=True):
+            self.calls.append(((float(a[0]), float(a[1])), (float(b[0]), float(b[1])), bool(ok)))
+        return result
+
+
+def _maze_segments() -> Segments:
+    return [((float(a[0]), float(a[1])), (float(b[0]), float(b[1]))) for a, b in generate_maze(10, seed=42).walls]
+
+
+@pytest.mark.parametrize("n", [40, 300], ids=["dense", "kdtree"])
+@pytest.mark.parametrize("seed", [0, 1])
+def test_line_of_sight_cast_once_per_unordered_pair_and_gates_occluding_observers(n: int, seed: int) -> None:
+    rng = np.random.default_rng(seed)
+    pos = rng.uniform(0.0, 20.0, size=(n, 2))
+    theta = rng.uniform(-np.pi, np.pi, size=n)
+    vision_fov = rng.choice([90.0, 180.0, 210.0, 360.0], size=n)
+    vision_range = rng.uniform(2.0, 10.0, size=n)
+    proximity_sense = rng.choice([0.0, 0.5, 1.0], size=n)
+    vision_occlusion = rng.random(n) < 0.7
+
+    agents = [
+        _make_agent(
+            i + 1,
+            float(pos[i, 0]),
+            float(pos[i, 1]),
+            theta=float(theta[i]),
+            vision_range=float(vision_range[i]),
+            vision_fov=float(vision_fov[i]),
+            proximity_sense=float(proximity_sense[i]),
+            vision_occlusion=bool(vision_occlusion[i]),
+        )
+        for i in range(n)
+    ]
+
+    pool_free = _pool_from(agents)
+    DefaultPerception().compute_pool(pool_free)
+
+    inner = BitmapOccluder()
+    recorder = _RecordingOccluder(inner)
+    recorder.set_walls(_maze_segments())
+    pool = _pool_from(agents)
+    DefaultPerception(occluder=recorder).compute_pool(pool)
+
+    index_of = {(float(pos[i, 0]), float(pos[i, 1])): i for i in range(n)}
+    clear_by_pair: dict[frozenset[int], bool] = {}
+    for p_a, p_b, ok in recorder.calls:
+        pair = frozenset((index_of[p_a], index_of[p_b]))
+        assert len(pair) == 2
+        assert pair not in clear_by_pair, f"pair {sorted(pair)} cast twice"
+        clear_by_pair[pair] = ok
+
+    assert any(clear_by_pair.values())
+    assert not all(clear_by_pair.values())
+
+    for r in range(n):
+        candidates = _neighbors(pool_free, r)
+        kept = _neighbors(pool, r)
+        assert kept <= candidates
+        if not vision_occlusion[r]:
+            assert kept == candidates, f"row {r} ignores occlusion but lost {sorted(candidates - kept)}"
+            continue
+        for c in candidates:
+            pair = frozenset((r, c))
+            assert pair in clear_by_pair, f"candidate pair {(r, c)} never cast"
+            assert (c in kept) == clear_by_pair[pair], f"row {r} neighbor {c}: kept={c in kept} clear={clear_by_pair[pair]}"

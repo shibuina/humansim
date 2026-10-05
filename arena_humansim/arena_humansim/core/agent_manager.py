@@ -311,6 +311,8 @@ class AgentManager(Node):
             self._ticks_limit = max(1, int(round(time_limit / self._dt)))
         self._rtf = float(self.get_parameter("rtf").value)
         self._subsystem_overrun_policy = str(self.get_parameter("subsystem_overrun_policy").value)
+        if self._mode == self.MODE_SUBSYSTEM and self._subsystem_overrun_policy != "lag":
+            raise ValueError(f"subsystem_overrun_policy={self._subsystem_overrun_policy!r} not implemented; only 'lag' is available")
         self._robot_policy_override = str(self.get_parameter("robot_policy").value)
         self._trial_id = str(self.get_parameter("trial_id").value)
         self._robot_shutdown_override = str(self.get_parameter("robot_shutdown").value).strip().lower()
@@ -1888,8 +1890,6 @@ class AgentManager(Node):
         #                  Correct physics, possibly stale realtime. (only one implemented)
         #   skip         - drop ticks to stay current with /clock. Not implemented.
         #   backpressure - signal orchestrator to throttle /clock. Not implemented.
-        if self._subsystem_overrun_policy != "lag":
-            raise ValueError(f"subsystem_overrun_policy={self._subsystem_overrun_policy!r} not implemented; only 'lag' is available")
         clock_sub_qos = QoSProfile(depth=10, reliability=ReliabilityPolicy.BEST_EFFORT)
         self._clock_sub = self.create_subscription(Clock, "/clock", self._subsystem_timer_callback, clock_sub_qos)
         # Accumulated spawn/despawn IDs returned to callers via feedback

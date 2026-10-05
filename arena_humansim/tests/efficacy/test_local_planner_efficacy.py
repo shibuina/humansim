@@ -93,7 +93,7 @@ def test_wall_repulsion(planner_name: str, agent_factory: Callable[..., BaseAgen
 
     a_free = agent_factory(agent_id=1, x=0.0, y=0.5)
     a_wall = agent_factory(agent_id=1, x=0.0, y=0.5)
-    goal = Pose2D(x=5.0, y=0.5)
+    goal = Pose2D(x=5.0, y=-0.5)
 
     v_free = p_free.compute([a_free], {a_free.state.agent_id: goal}, dt=0.1)[a_free.state.agent_id]
     v_wall = p_wall.compute([a_wall], {a_wall.state.agent_id: goal}, dt=0.1)[a_wall.state.agent_id]

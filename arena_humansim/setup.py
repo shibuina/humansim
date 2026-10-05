@@ -41,6 +41,7 @@ setup(
         "pyyaml",
         "numpy",
         "scipy",
+        "numba",
         "py_trees",
         "pyastar2d",
         "pydantic",

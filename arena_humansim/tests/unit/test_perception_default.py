@@ -249,3 +249,55 @@ def test_prepare_tick_builds_tree_only_when_more_than_one_agent() -> None:
     assert perception.shared_ids == [1, 2]
     assert perception.shared_positions is not None
     assert len(perception.shared_positions) == 2
+
+
+def _arctan2_reference_neighbors(
+    pos: np.ndarray,
+    theta: np.ndarray,
+    vision_range: np.ndarray,
+    vision_fov: np.ndarray,
+    proximity_sense: np.ndarray,
+) -> list[set[int]]:
+    diff = pos[None, :, :] - pos[:, None, :]
+    dists = np.hypot(diff[:, :, 0], diff[:, :, 1])
+    np.fill_diagonal(dists, np.inf)
+    bearing = np.arctan2(diff[:, :, 1], diff[:, :, 0])
+    angle_diff = bearing - theta[:, None]
+    angle_diff = np.abs(np.arctan2(np.sin(angle_diff), np.cos(angle_diff)))
+    fov_ok = (angle_diff <= np.radians(vision_fov * 0.5)[:, None]) | (vision_fov >= 360.0)[:, None]
+    keep = ((dists <= vision_range[:, None]) & fov_ok) | (dists <= proximity_sense[:, None])
+    return [set(np.flatnonzero(row).tolist()) for row in keep]
+
+
+@pytest.mark.parametrize(("n", "extent"), [(40, 12.0), (300, 40.0)], ids=["dense", "kdtree"])
+@pytest.mark.parametrize("seed", [0, 1, 2])
+def test_compute_pool_fov_matches_arctan2_reference(n: int, extent: float, seed: int) -> None:
+    rng = np.random.default_rng(seed)
+    pos = rng.uniform(0.0, extent, size=(n, 2))
+    theta = rng.uniform(-np.pi, np.pi, size=n)
+    vision_fov = rng.choice([90.0, 180.0, 210.0, 360.0], size=n)
+    vision_range = rng.uniform(2.0, 10.0, size=n)
+    proximity_sense = rng.choice([0.0, 0.5, 1.0], size=n)
+
+    agents = [
+        _make_agent(
+            i + 1,
+            float(pos[i, 0]),
+            float(pos[i, 1]),
+            theta=float(theta[i]),
+            vision_range=float(vision_range[i]),
+            vision_fov=float(vision_fov[i]),
+            proximity_sense=float(proximity_sense[i]),
+        )
+        for i in range(n)
+    ]
+    pool = _pool_from(agents)
+    DefaultPerception().compute_pool(pool)
+
+    reference = _arctan2_reference_neighbors(pos, theta, vision_range, vision_fov, proximity_sense)
+    assert pool.neighbor_indptr.shape == (n + 1,)
+    assert sum(len(nb) for nb in reference) > n
+    for r in range(n):
+        got = _csr_neighbors(pool, r)
+        assert len(got) == len(set(got)), f"duplicate neighbors at row {r}: {got}"
+        assert set(got) == reference[r], f"row {r}: got={sorted(got)} reference={sorted(reference[r])}"

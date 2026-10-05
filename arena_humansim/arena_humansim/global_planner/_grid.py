@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import math
-from collections.abc import Iterable, Sequence
+from collections.abc import Sequence
 
 import numpy as np
 from scipy.ndimage import label
@@ -104,37 +104,22 @@ def push_from_walls(
     return result
 
 
-def min_distance_to_path(pos: Pose2D, waypoints: Iterable[Pose2D]) -> float:
-    best = math.inf
-    prev: Pose2D | None = None
-    for wp in waypoints:
-        ax, ay = (wp.x, wp.y) if prev is None else (prev.x, prev.y)
-        dx, dy = wp.x - ax, wp.y - ay
-        span = dx * dx + dy * dy
-        t = 0.0 if span == 0.0 else max(0.0, min(1.0, ((pos.x - ax) * dx + (pos.y - ay) * dy) / span))
-        d = math.hypot(pos.x - ax - t * dx, pos.y - ay - t * dy)
-        if d < best:
-            best = d
-        prev = wp
-    return best
-
-
-def needs_replan(
-    path_cache: dict[int, tuple[tuple[float, float], list[Pose2D], int]],
-    agent_id: int,
-    goal: Pose2D,
-    agent_pos: Pose2D,
-    replan_distance: float,
-) -> bool:
-    if agent_id not in path_cache:
-        return True
-    cached_goal, waypoints, _ = path_cache[agent_id]
-    goal_key = (round(goal.x, 3), round(goal.y, 3))
-    if cached_goal != goal_key:
-        return True
-    if not waypoints:
-        return True
-    return min_distance_to_path(agent_pos, waypoints) > replan_distance
+def min_distances_to_paths(positions: np.ndarray, paths: Sequence[np.ndarray]) -> np.ndarray:
+    lengths = np.fromiter((len(p) for p in paths), dtype=np.intp, count=len(paths))
+    starts = np.zeros(len(paths), dtype=np.intp)
+    np.cumsum(lengths[:-1], out=starts[1:])
+    b = np.concatenate(paths)
+    prev = np.arange(len(b), dtype=np.intp) - 1
+    prev[starts] = starts
+    a = b[prev]
+    dx, dy = b[:, 0] - a[:, 0], b[:, 1] - a[:, 1]
+    p = np.repeat(positions, lengths, axis=0)
+    rx, ry = p[:, 0] - a[:, 0], p[:, 1] - a[:, 1]
+    span = dx * dx + dy * dy
+    t = np.zeros_like(span)
+    np.divide(rx * dx + ry * dy, span, out=t, where=span != 0.0)
+    np.clip(t, 0.0, 1.0, out=t)
+    return np.fmin.reduceat(np.hypot(rx - t * dx, ry - t * dy), starts)
 
 
 def next_waypoint(waypoints: Sequence[Pose2D], idx: int) -> Pose2D:

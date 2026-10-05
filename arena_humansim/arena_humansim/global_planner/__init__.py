@@ -6,13 +6,15 @@ from abc import ABC, abstractmethod
 from collections.abc import Callable, Iterable, Sequence
 from typing import TYPE_CHECKING, Any
 
+import numpy as np
+
 from arena_humansim.core.agents import BaseAgent
 from arena_humansim.core.pool import PoolAware
 from arena_humansim.utils import ModuleRegistry
 from arena_humansim.utils.loggable import Loggable
 from arena_humansim.utils.types import CommandType, HighLevelCommand, Pose2D, WallAware
 
-from ._grid import needs_replan, next_waypoint
+from ._grid import min_distances_to_paths, next_waypoint
 
 if TYPE_CHECKING:
     from arena_humansim.core.viz import MarkerPublisher
@@ -75,7 +77,7 @@ def simplify_path(
 class GlobalPlanner(PoolAware, WallAware, Loggable, ABC):
     def __init__(self, replan_distance: float = 1.0) -> None:
         self._replan_distance = replan_distance
-        self._path_cache: dict[int, tuple[tuple[float, float], list[Pose2D], int]] = {}
+        self._path_cache: dict[int, tuple[tuple[float, float], list[Pose2D], np.ndarray, int]] = {}
         self._cached_results: dict[int, Pose2D] = {}
 
     @abstractmethod
@@ -92,24 +94,29 @@ class GlobalPlanner(PoolAware, WallAware, Loggable, ABC):
         agent_positions: dict[int, Pose2D] = {agent.state.agent_id: agent.state.pose for agent in agents}
         goals: dict[int, Pose2D] = {}
         requests: dict[int, tuple[Pose2D, Pose2D]] = {}
+        navigate = {agent_id: cmd.target_pose for agent_id, cmd in high_level_commands.items() if isinstance(cmd, HighLevelCommand) and cmd.type == CommandType.NAVIGATE}
+        has_map = self._has_map()
 
-        for agent_id, cmd in high_level_commands.items():
-            if not isinstance(cmd, HighLevelCommand):
-                continue
-            if cmd.type != CommandType.NAVIGATE:
-                continue
+        deviations: dict[int, float] = {}
+        if has_map:
+            tracked = [(agent_id, agent_positions[agent_id], entry[2]) for agent_id, target in navigate.items() if agent_id in agent_positions and (entry := self._path_cache.get(agent_id)) is not None and entry[0] == (round(target.x, 3), round(target.y, 3)) and entry[1]]
+            if tracked:
+                positions = np.array([(pos.x, pos.y) for _, pos, _ in tracked], dtype=np.float64)
+                distances = min_distances_to_paths(positions, [points for _, _, points in tracked])
+                deviations = dict(zip([agent_id for agent_id, _, _ in tracked], distances.tolist(), strict=True))
 
-            target = cmd.target_pose
+        for agent_id, target in navigate.items():
             agent_pos = agent_positions.get(agent_id)
 
-            if agent_pos is None or not self._has_map():
+            if agent_pos is None or not has_map:
                 goals[agent_id] = target
                 continue
 
-            if not needs_replan(self._path_cache, agent_id, target, agent_pos, self._replan_distance):
-                cached_goal, waypoints, idx = self._path_cache[agent_id]
+            deviation = deviations.get(agent_id)
+            if deviation is not None and deviation <= self._replan_distance:
+                cached_goal, waypoints, points, idx = self._path_cache[agent_id]
                 idx = self.advance_along_path(agent_pos, waypoints, idx)
-                self._path_cache[agent_id] = (cached_goal, waypoints, idx)
+                self._path_cache[agent_id] = (cached_goal, waypoints, points, idx)
                 goals[agent_id] = next_waypoint(waypoints, idx)
                 continue
 
@@ -132,7 +139,7 @@ class GlobalPlanner(PoolAware, WallAware, Loggable, ABC):
 
                 goal_key = (round(target.x, 3), round(target.y, 3))
                 idx = self.advance_along_path(agent_pos, waypoints, 0)
-                self._path_cache[agent_id] = (goal_key, waypoints, idx)
+                self._path_cache[agent_id] = (goal_key, waypoints, np.array([(w.x, w.y) for w in waypoints], dtype=np.float64).reshape(-1, 2), idx)
                 goals[agent_id] = next_waypoint(waypoints, idx)
 
         self._cached_results = goals
@@ -142,7 +149,7 @@ class GlobalPlanner(PoolAware, WallAware, Loggable, ABC):
         return dict(self._cached_results)
 
     def get_cached_paths(self) -> dict[int, list[Pose2D]]:
-        return {aid: wps for aid, (_, wps, _) in self._path_cache.items()}
+        return {aid: wps for aid, (_, wps, _, _) in self._path_cache.items()}
 
     def invalidate_paths(self, agent_ids: Iterable[int]) -> None:
         for aid in agent_ids:
