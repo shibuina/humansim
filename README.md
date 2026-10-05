@@ -10,7 +10,7 @@ AgentManager (ROS 2 Node)                    [core/]
 ├── Perception         KDTree neighbor queries + FOV filtering       [perception/]
 ├── Behavior Trees     py_trees decision making + needs system       [core/behavior/]
 ├── Global Planner     A* pathfinding on inflated occupancy grid     [global_planner/]
-├── Local Planner      SFM/HSFM/ORCA/SocialGAIL collision avoidance  [local_planner/]
+├── Local Planner      Force, velocity-obstacle, learned avoidance   [local_planner/]
 ├── Animation          Kinematic forward integration                 [animation/]
 ├── Collision          Wall projection overlap resolution            [collision/]
 ├── SpawnScheduler     Poisson-process agent spawning at sources
@@ -30,7 +30,7 @@ Each simulation step follows a fixed pipeline:
 2. **Sense** — build neighbor graph (KDTree + FOV pruning → CSR sparse matrix)
 3. **Decide** — tick behavior trees (every N ticks), emit high-level commands
 4. **Global Plan** — A* pathfinding with LOS simplification and wall push-back
-5. **Local Plan** — SFM / ORCA velocity computation (vectorized over pool)
+5. **Local Plan** — local planner velocity computation (vectorized over pool)
 6. **Interact** — update social interaction state machines
 7. **Kinematics** — enforce acceleration, speed, and turning-radius limits
 8. **Animate** — forward-integrate position and heading
@@ -44,7 +44,7 @@ All modules are swappable via a plugin registry.
 | Layer | Options | Default |
 |---|---|---|
 | [Global Planner](arena_humansim/arena_humansim/global_planner/README.md) | `navmesh`, `astar`, `dijkstra` | `navmesh` |
-| [Local Planner](arena_humansim/arena_humansim/local_planner/README.md) | `sfm`, `hsfm`, `orca`, `straight`, `socialgail` | `sfm` |
+| [Local Planner](arena_humansim/arena_humansim/local_planner/README.md) | `sfm`, `hsfm`, `orca`, `helbing`, `johansson`, `karamouzas`, `zanlungo`, `gcf`, `pedvo`, `straight`, `socialgail` | `sfm` |
 | [Perception](arena_humansim/arena_humansim/perception/README.md) | `default` | `default` |
 | [Animation](arena_humansim/arena_humansim/animation/README.md) | `noop`, `kinematic` | `noop` |
 | [Collision](arena_humansim/arena_humansim/collision/README.md) | `wall_projection`, `noop` | `wall_projection` |
