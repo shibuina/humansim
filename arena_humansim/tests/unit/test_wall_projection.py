@@ -125,7 +125,7 @@ def test_resolve_matches_sequential_reference_on_maze(seed: int, pool_empty: Cal
     resolver = WallProjectionResolver(margin=_MARGIN)
     resolver.set_walls(segments)
 
-    corrected = resolver.resolve(pool)
+    corrected = resolver._project(pool)
     ref_corrected = _reference_resolve(ref_pool, segments, _MARGIN)
 
     assert len(ref_corrected) > 100
@@ -143,7 +143,7 @@ def test_resolve_matches_sequential_reference_over_repeated_ticks(pool_empty: Ca
     rng = np.random.default_rng(11)
 
     for _ in range(5):
-        corrected = resolver.resolve(pool)
+        corrected = resolver._project(pool)
         ref_corrected = _reference_resolve(ref_pool, segments, _MARGIN)
         assert corrected == ref_corrected
         assert np.allclose(pool.pos, ref_pool.pos, rtol=0.0, atol=1e-12)
@@ -163,7 +163,7 @@ def test_resolve_matches_sequential_reference_on_random_long_walls(pool_empty: C
     resolver = WallProjectionResolver(margin=_MARGIN)
     resolver.set_walls(segments)
 
-    corrected = resolver.resolve(pool)
+    corrected = resolver._project(pool)
     ref_corrected = _reference_resolve(ref_pool, segments, _MARGIN)
 
     assert len(ref_corrected) > 100
@@ -190,10 +190,111 @@ def test_resolve_matches_reference_when_candidates_exceed_query_buffer(pool_empt
     resolver = WallProjectionResolver(margin=_MARGIN)
     resolver.set_walls(segments)
 
-    corrected = resolver.resolve(pool)
+    corrected = resolver._project(pool)
     ref_corrected = _reference_resolve(ref_pool, segments, _MARGIN)
 
     assert ref_corrected == {3}
     assert corrected == ref_corrected
     assert np.allclose(pool.pos, ref_pool.pos, rtol=0.0, atol=1e-12)
     assert np.allclose(pool.vel, ref_pool.vel, rtol=0.0, atol=1e-12)
+
+
+def _contact_pool(pool_empty: Callable[..., AgentPool], agent_factory: Callable[..., BaseAgent], positions: list[tuple[float, float]], autonomous: list[bool]) -> AgentPool:
+    pool = pool_empty(capacity=max(2, len(positions)))
+    for i, (x, y) in enumerate(positions):
+        pool.add_agent(agent_factory(i + 1, x=x, y=y))
+        pool.agent_radius[i] = 0.25
+        pool.policy_idx[i] = 0 if autonomous[i] else -1
+    return pool
+
+
+def test_overlapping_pair_separates_and_stops_closing(pool_empty: Callable[..., AgentPool], agent_factory: Callable[..., BaseAgent]) -> None:
+    pool = _contact_pool(pool_empty, agent_factory, [(0.0, 0.0), (0.3, 0.0)], [True, True])
+    pool.vel[0] = (1.0, 0.4)
+    pool.vel[1] = (-1.0, -0.2)
+
+    WallProjectionResolver(margin=_MARGIN).resolve(pool)
+
+    assert pool.pos[0] == pytest.approx((-0.1, 0.0), abs=1e-12)
+    assert pool.pos[1] == pytest.approx((0.4, 0.0), abs=1e-12)
+    assert pool.vel[0] == pytest.approx((0.0, 0.4), abs=1e-12)
+    assert pool.vel[1] == pytest.approx((0.0, -0.2), abs=1e-12)
+
+
+def test_separating_pair_keeps_velocity(pool_empty: Callable[..., AgentPool], agent_factory: Callable[..., BaseAgent]) -> None:
+    pool = _contact_pool(pool_empty, agent_factory, [(0.0, 0.0), (0.3, 0.0)], [True, True])
+    pool.vel[0] = (-1.0, 0.0)
+    pool.vel[1] = (1.0, 0.0)
+
+    WallProjectionResolver(margin=_MARGIN).resolve(pool)
+
+    assert pool.vel[0] == pytest.approx((-1.0, 0.0), abs=1e-12)
+    assert pool.vel[1] == pytest.approx((1.0, 0.0), abs=1e-12)
+
+
+def test_non_autonomous_agent_is_not_pushed(pool_empty: Callable[..., AgentPool], agent_factory: Callable[..., BaseAgent]) -> None:
+    pool = _contact_pool(pool_empty, agent_factory, [(0.0, 0.0), (0.3, 0.0)], [True, False])
+    pool.vel[0] = (1.0, 0.0)
+    pool.vel[1] = (-0.5, 0.0)
+
+    WallProjectionResolver(margin=_MARGIN).resolve(pool)
+
+    assert pool.pos[1] == pytest.approx((0.3, 0.0), abs=1e-12)
+    assert pool.vel[1] == pytest.approx((-0.5, 0.0), abs=1e-12)
+    assert pool.pos[0] == pytest.approx((-0.2, 0.0), abs=1e-12)
+    assert pool.vel[0] == pytest.approx((-0.5, 0.0), abs=1e-12)
+
+
+def test_two_non_autonomous_agents_stay_overlapping(pool_empty: Callable[..., AgentPool], agent_factory: Callable[..., BaseAgent]) -> None:
+    pool = _contact_pool(pool_empty, agent_factory, [(0.0, 0.0), (0.3, 0.0)], [False, False])
+
+    WallProjectionResolver(margin=_MARGIN).resolve(pool)
+
+    assert pool.pos[0] == pytest.approx((0.0, 0.0), abs=1e-12)
+    assert pool.pos[1] == pytest.approx((0.3, 0.0), abs=1e-12)
+
+
+def test_coincident_agents_split_apart(pool_empty: Callable[..., AgentPool], agent_factory: Callable[..., BaseAgent]) -> None:
+    pool = _contact_pool(pool_empty, agent_factory, [(1.0, 1.0), (1.0, 1.0)], [True, True])
+
+    WallProjectionResolver(margin=_MARGIN).resolve(pool)
+
+    assert np.all(np.isfinite(pool.pos[:2]))
+    assert np.hypot(*(pool.pos[0] - pool.pos[1])) == pytest.approx(0.5, abs=1e-12)
+
+
+def test_walls_win_over_agent_contact(pool_empty: Callable[..., AgentPool], agent_factory: Callable[..., BaseAgent]) -> None:
+    resolver = WallProjectionResolver(margin=_MARGIN)
+    resolver.set_walls([((-2.0, 0.0), (2.0, 0.0))])
+    pool = _contact_pool(pool_empty, agent_factory, [(0.0, 0.27), (0.0, 0.6)], [True, True])
+
+    resolver.resolve(pool)
+
+    assert pool.pos[0, 1] >= 0.25 + _MARGIN - 1e-12
+
+
+def test_crowd_overlap_converges_over_ticks_and_is_deterministic(pool_empty: Callable[..., AgentPool], agent_factory: Callable[..., BaseAgent]) -> None:
+    rng = np.random.default_rng(3)
+    positions = [(float(x), float(y)) for x, y in rng.uniform(0.0, 10.0, size=(200, 2))]
+
+    def worst_overlap(pool: AgentPool) -> float:
+        p = pool.pos[: pool.n]
+        d = np.hypot(p[:, None, 0] - p[None, :, 0], p[:, None, 1] - p[None, :, 1])
+        np.fill_diagonal(d, np.inf)
+        return float(0.5 - d.min())
+
+    def run(ticks: int) -> AgentPool:
+        pool = _contact_pool(pool_empty, agent_factory, positions, [True] * 200)
+        resolver = WallProjectionResolver(margin=_MARGIN)
+        for _ in range(ticks):
+            resolver.resolve(pool)
+        return pool
+
+    overlaps = [worst_overlap(run(ticks)) for ticks in range(5)]
+    again = run(4)
+
+    assert overlaps[0] > 0.4
+    assert all(later < earlier for earlier, later in zip(overlaps, overlaps[1:], strict=False))
+    assert overlaps[4] < 0.05
+    assert np.array_equal(run(4).pos, again.pos)
+    assert np.array_equal(run(4).vel, again.vel)

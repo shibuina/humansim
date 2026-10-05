@@ -1,12 +1,12 @@
 # Collision resolvers
 
-Final step of the tick pipeline. Removes agent-wall overlap introduced by the integrator. Agent-agent collisions are handled by the local planner (SFM/ORCA) and are out of scope here.
+Final step of the tick pipeline. Removes agent-agent and agent-wall overlap introduced by the integrator, walls last so they win.
 
 ## Available
 
 | Name | Class | Notes |
 |---|---|---|
-| `wall_projection` | `WallProjectionResolver` | Projects overlapping agents along the wall normal, plus a tangent wall-slide on velocity. Up to 3 relaxation passes per tick. Default. |
+| `wall_projection` | `WallProjectionResolver` | Separates overlapping agent pairs, then projects agents out of walls along the wall normal with a tangent wall-slide on velocity. Default. |
 | `noop` | `NoopCollisionResolver` | Does nothing. Use when the scenario has no walls or overlap is tolerable. |
 
 ## Contract
@@ -24,7 +24,9 @@ class CollisionResolver(WallAware, Loggable, ABC):
 
 ## `wall_projection` semantics
 
-For each agent within `radius + margin` of a wall segment:
+Agent contact first. Every pair closer than the sum of its radii is pushed apart along the center line by the overlap, split evenly, and the closing component of the pair's relative velocity is removed. Three Gauss-Seidel passes run over the pairs found at the start of the tick. A non-autonomous agent (`policy_idx == -1`, e.g. an externally driven robot) is immovable and its partner takes the whole push. Residual overlap in a jam carries over and shrinks over the next ticks.
+
+Walls second. For each agent within `radius + margin` of a wall segment:
 
 1. Find the closest point on the segment (clipped to endpoints).
 2. Push the agent out along the outward normal by `(radius + margin) - dist`.
