@@ -92,6 +92,12 @@ def _load_johansson() -> type[LocalPlanner]:
     return JohanssonPlanner
 
 
+def _load_karamouzas() -> type[LocalPlanner]:
+    from .karamouzas import KaramouzasPlanner
+
+    return KaramouzasPlanner
+
+
 def _load_socialgail() -> type[LocalPlanner]:
     from .socialgail import SocialGAILPlanner
 
@@ -134,6 +140,7 @@ _registry.register("straight")(_load_straight)
 _registry.register("hsfm")(_load_hsfm)
 _registry.register("helbing")(_load_helbing)
 _registry.register("johansson")(_load_johansson)
+_registry.register("karamouzas")(_load_karamouzas)
 _registry.register("socialgail")(_load_socialgail)
 _registry.register("nsp")(_load_nsp)
 _registry.register("dsrnn")(_load_dsrnn)

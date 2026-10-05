@@ -11,6 +11,7 @@ Velocity commands for the next tick, given each agent's global subgoal and neigh
 | `orca` | `ORCAPlanner` | Reciprocal velocity obstacles (RVO2 agent and wall constraints). Numba kernel, `supports_pool=True`. |
 | `helbing` | `HelbingPlanner` | Helbing/Farkas/Vicsek 2000 social force with body compression and sliding friction on contact, after Menge's AgtHelbing. Numba kernel on the `ForcePlanner` base (`force.py`), `supports_pool=True`. |
 | `johansson` | `JohanssonPlanner` | Johansson/Helbing/Shukla 2007 elliptical repulsion from the neighbor's stride offset, after Menge's AgtJohansson. `ForcePlanner`. |
+| `karamouzas` | `KaramouzasPlanner` | Karamouzas et al. 2009 predictive avoidance from the K most imminent times to collision, after Menge's AgtKaramouzas. `ForcePlanner`. |
 | `straight` | `StraightToGoalPlanner` | Ignores neighbors, drives toward the subgoal at `desired_velocity`. `supports_pool=True`. For debugging and robot policies that don't want avoidance. |
 | `socialgail` | `SocialGAILPlanner` | Learned crowd-sim policy from [William-island/SocialGAIL](https://github.com/William-island/SocialGAIL) (ICRA 2024, MIT). Pretrained HGNN actor; weights fetched on first use to `~/.cache/arena_humansim/socialgail/best.pt`. Requires `pip install torch torch-geometric`. `supports_pool=True`; re-infers every 8 sim ticks (0.4s decision interval, matching training). No wall handling - relies on `wall_projection`. |
 
@@ -75,4 +76,5 @@ Per-agent local-planner params live under `local_planner_params:` in each agent 
 | `hsfm` | the SFM keys plus `lateral_gain` (body-frame perp force gain, <=1 attenuates), `lateral_damping` (perp velocity damping), `angular_gain` (heading P-gain), `angular_damping` (angular velocity damping) |
 | `helbing` | `relaxation_time`, `mass`, `agent_scale`, `obstacle_scale`, `force_distance`, `body_force`, `friction` |
 | `johansson` | `relaxation_time`, `agent_scale`, `obstacle_scale`, `force_distance`, `stride_time`, `fov_weight` |
+| `karamouzas` | `relaxation_time`, `wall_steepness`, `wall_distance`, `colliding_count`, `d_min`, `d_mid`, `d_max`, `agent_force`, `personal_space`, `anticipation`, `fov_angle` (degrees) |
 | `orca` / `straight` / `socialgail` / `nsp` | none |
