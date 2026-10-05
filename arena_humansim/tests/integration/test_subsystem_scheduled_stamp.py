@@ -26,7 +26,7 @@ def _clock(ns: int) -> Clock:
 
 
 def _stamp_ns(mgr) -> int:
-    stamp = mgr._build_agent_states_msg().header.stamp
+    stamp = mgr._build_agent_frame().header.stamp
     return stamp.sec * NS + stamp.nanosec
 
 

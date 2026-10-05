@@ -5,12 +5,13 @@ from pathlib import Path
 
 import pytest
 import yaml
-from arena_humansim_msgs.msg import AgentStates as AgentStatesMsg
+from arena_humansim_msgs.msg import AgentFrame as AgentFrameMsg
 from rclpy.node import Node
 from rclpy.parameter import Parameter
 
 from arena_humansim.core.recorder import BagRecorder
-from tests.ros._helpers import make_system
+from arena_humansim.utils.bag_io import extract_agent_states
+from tests.ros._helpers import SpawnAgents, make_spawn_request, make_system
 
 pytestmark = pytest.mark.ros
 
@@ -46,7 +47,7 @@ def test_second_publisher_marks_the_manifest_contaminated(tmp_path: Path) -> Non
         client_node_name="manifest_client_dirty",
         parameter_overrides=_params(record_bag=True, record_dir=str(tmp_path), strict_recording=False),
     )
-    intruder = sys_.client_node.create_publisher(AgentStatesMsg, "agent_states", 10)
+    intruder = sys_.client_node.create_publisher(AgentFrameMsg, "agent_states", 10)
     try:
         sys_.drain(1.0)
         assert sys_.manager._recorder._check_publishers() is False
@@ -60,7 +61,7 @@ def test_second_publisher_marks_the_manifest_contaminated(tmp_path: Path) -> Non
 
 def test_strict_guard_calls_back_with_the_counts(tmp_path: Path) -> None:
     node = Node("manifest_strict_node")
-    publishers = [node.create_publisher(AgentStatesMsg, "agent_states", 10) for _ in range(2)]
+    publishers = [node.create_publisher(AgentFrameMsg, "agent_states", 10) for _ in range(2)]
     seen: list[dict[str, int]] = []
     try:
         recorder = BagRecorder(node, tmp_path, strict=True, on_contamination=seen.append)
@@ -73,3 +74,27 @@ def test_strict_guard_calls_back_with_the_counts(tmp_path: Path) -> None:
         for pub in publishers:
             node.destroy_publisher(pub)
         node.destroy_node()
+
+
+def test_recorded_bag_names_the_planner_of_every_frame_row(tmp_path: Path) -> None:
+    sys_ = make_system(
+        client_node_name="manifest_client_planners",
+        parameter_overrides=_params(record_bag=True, record_dir=str(tmp_path), strict_recording=False),
+    )
+    try:
+        resp = sys_.call(SpawnAgents, "spawn_agents", make_spawn_request([{"x": 0.0, "y": 0.0}, {"x": 2.0, "y": 1.0}]))
+        assert resp.success is True
+        pool = sys_.manager._pool
+        expected = {int(aid): sys_.manager._policy_names[int(pool.policy_idx[pool._id_to_idx[aid]])] for aid in resp.spawned_ids}
+        for _ in range(3):
+            sys_.tick_manager(1)
+            sys_.drain(0.2)
+    finally:
+        sys_.shutdown()
+
+    assert all(expected.values())
+    assert _manifest(tmp_path)["first_message_policies"] == expected
+    df = extract_agent_states(tmp_path / "bag")
+    assert set(df["agent_id"]) == set(expected)
+    assert len(df) == 3 * len(expected)
+    assert {int(a): p for a, p in zip(df["agent_id"], df["planner"], strict=True)} == expected

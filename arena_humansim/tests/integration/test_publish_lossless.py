@@ -5,8 +5,8 @@ import pytest
 pytest.importorskip("rclpy")
 
 from arena_humansim.utils.scenario import ModuleConfig, ScenarioConfig, SimulationParams
+from arena_humansim_msgs.msg import AgentFrame as AgentFrameMsg
 from arena_humansim_msgs.msg import AgentState as AgentStateMsg
-from arena_humansim_msgs.msg import AgentStates as AgentStatesMsg
 from arena_humansim_msgs.msg import Waypoint as WaypointMsg
 from arena_humansim_msgs.msg import Waypoints as WaypointsMsg
 from arena_humansim_msgs.srv import SpawnAgents
@@ -64,9 +64,9 @@ def test_master_mode_no_drops_uniform_spacing() -> None:
 
     _spawn_agents(mgr, n_agents)
 
-    received: list[AgentStatesMsg] = []
+    received: list[AgentFrameMsg] = []
     qos = QoSProfile(depth=n_ticks * 2, reliability=ReliabilityPolicy.RELIABLE)
-    mgr.create_subscription(AgentStatesMsg, "agent_states", lambda m: received.append(m), qos)
+    mgr.create_subscription(AgentFrameMsg, "agent_states", lambda m: received.append(m), qos)
 
     executor = SingleThreadedExecutor()
     executor.add_node(mgr)

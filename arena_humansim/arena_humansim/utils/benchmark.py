@@ -17,8 +17,8 @@ import numpy as np
 import rclpy
 import yaml
 from ament_index_python.packages import get_package_share_directory
+from arena_humansim_msgs.msg import AgentFrame as AgentFrameMsg
 from arena_humansim_msgs.msg import AgentState as AgentStateMsg
-from arena_humansim_msgs.msg import AgentStates as AgentStatesMsg
 from arena_humansim_msgs.msg import Waypoint as WaypointMsg
 from arena_humansim_msgs.msg import Waypoints as WaypointsMsg
 from arena_humansim_msgs.srv import AddWalls, GetProfile, RemoveAgents, RemoveWalls, SpawnAgents
@@ -107,13 +107,13 @@ class BenchmarkDriver(Node):
         self._done_event = threading.Event()
 
         self._sub = self.create_subscription(
-            AgentStatesMsg,
+            AgentFrameMsg,
             "agent_states",
             self._on_agent_states,
             10,
         )
 
-    def _on_agent_states(self, msg: AgentStatesMsg):
+    def _on_agent_states(self, msg: AgentFrameMsg):
         now = time.perf_counter()
         if not self._collecting:
             self._last_recv = now

@@ -5,8 +5,8 @@ from collections.abc import Iterator
 from typing import Any
 
 import rclpy
+from arena_humansim_msgs.msg import AgentFrame as AgentFrameMsg
 from arena_humansim_msgs.msg import AgentState as AgentStateMsg
-from arena_humansim_msgs.msg import AgentStates as AgentStatesMsg
 from arena_humansim_msgs.msg import Waypoint, Waypoints
 from arena_humansim_msgs.srv import (
     AddObstacles,
@@ -31,7 +31,7 @@ class RosTestSystem:
         self.executor = executor
         self._clients: dict[str, Any] = {}
         self._sub: Any = None
-        self._received: list[AgentStatesMsg] = []
+        self._received: list[AgentFrameMsg] = []
 
     def client(self, srv_type: Any, name: str) -> Any:
         key = f"{srv_type.__name__}:{name}"
@@ -55,13 +55,13 @@ class RosTestSystem:
             return
         self._received = []
         self._sub = self.client_node.create_subscription(
-            AgentStatesMsg,
+            AgentFrameMsg,
             topic,
             lambda msg: self._received.append(msg),
             10,
         )
 
-    def wait_for_agent_states(self, timeout: float = 5.0) -> AgentStatesMsg:
+    def wait_for_agent_states(self, timeout: float = 5.0) -> AgentFrameMsg:
         self.subscribe_agent_states()
         deadline = time.monotonic() + timeout
         start_len = len(self._received)
@@ -69,7 +69,7 @@ class RosTestSystem:
             self.executor.spin_once(timeout_sec=0.05)
             if len(self._received) > start_len:
                 return self._received[-1]
-        raise TimeoutError(f"no AgentStates received within {timeout}s")
+        raise TimeoutError(f"no AgentFrame received within {timeout}s")
 
     def drain(self, duration: float = 0.2) -> None:
         deadline = time.monotonic() + duration
@@ -191,8 +191,8 @@ def make_get_profile_request(reset: bool = False) -> GetProfile.Request:
     return req
 
 
-def iter_agents(msg: AgentStatesMsg) -> Iterator[AgentStateMsg]:
-    yield from msg.agents
+def iter_agent_ids(msg: AgentFrameMsg) -> Iterator[int]:
+    yield from msg.agent_id
 
 
 # convenience re-exports
@@ -205,7 +205,7 @@ __all__ = [
     "ResetSimulation",
     "RosTestSystem",
     "SpawnAgents",
-    "iter_agents",
+    "iter_agent_ids",
     "make_add_walls_request",
     "make_agent_msg",
     "make_get_profile_request",

@@ -23,6 +23,8 @@ from rclpy.serialization import deserialize_message
 from rosbag2_py import ConverterOptions, SequentialReader, StorageOptions
 from rosidl_runtime_py.utilities import get_message
 
+from arena_humansim.utils.bag_io import AGENT_FRAME_TYPE, AGENT_META_TYPE, AGENT_STATES_TYPE, policy_names
+
 _log = logging.getLogger("arena_humansim_render")
 
 
@@ -59,10 +61,13 @@ def _read_bag(bag_dir: Path) -> tuple[Geometry, list[Frame]]:
         StorageOptions(uri=str(bag_dir), storage_id="mcap"),
         ConverterOptions(input_serialization_format="cdr", output_serialization_format="cdr"),
     )
-    type_map = {t.name: get_message(t.type) for t in reader.get_all_topics_and_types()}
+    topic_types = {t.name: t.type for t in reader.get_all_topics_and_types()}
+    type_map = {name: get_message(type_name) for name, type_name in topic_types.items()}
 
     geometry = Geometry(walls=[], obstacles=[], world_objects=[])
     frames: list[Frame] = []
+    flat: list[tuple[int, object]] = []
+    metas: list[tuple[int, list[str]]] = []
 
     while reader.has_next():
         topic, raw, t_ns = reader.read_next()
@@ -75,11 +80,31 @@ def _read_bag(bag_dir: Path) -> tuple[Geometry, list[Frame]]:
             geometry.walls = [((s.x, s.y), (e.x, e.y)) for s, e in zip(msg.wall_starts, msg.wall_ends)]
             geometry.obstacles = [((o.pose.x, o.pose.y, o.pose.theta), (o.bb_x_min, o.bb_x_max, o.bb_y_min, o.bb_y_max)) for o in msg.obstacles]
             geometry.world_objects = [(o.object_id, o.type, o.pose.x, o.pose.y) for o in msg.world_objects]
-        elif topic.endswith("agent_states"):
+        elif topic_types[topic] == AGENT_META_TYPE:
+            metas.append((t_ns, list(msg.policies)))
+        elif topic.endswith("agent_states") and topic_types[topic] == AGENT_FRAME_TYPE:
+            flat.append((t_ns, msg))
+        elif topic.endswith("agent_states") and topic_types[topic] == AGENT_STATES_TYPE:
             agents = [(int(a.agent_id), a.pose.x, a.pose.y, a.pose.theta, a.velocity.x, a.velocity.y, a.policy or "", int(a.kind)) for a in msg.agents]
             frames.append(Frame(t_ns=t_ns, agents=agents))
 
+    if flat:
+        frames.extend(_flat_frames(flat, metas))
     return geometry, frames
+
+
+def _flat_frames(flat: list[tuple[int, object]], metas: list[tuple[int, list[str]]]) -> list[Frame]:
+    frame_t = np.array([t for t, _ in flat], dtype=np.int64)
+    counts = np.array([len(m.agent_id) for _, m in flat], dtype=np.int64)
+    pidx = np.concatenate([np.asarray(m.policy_idx, dtype=np.int64) for _, m in flat])
+    names = policy_names(np.array([t for t, _ in metas], dtype=np.int64), [p for _, p in metas], frame_t, counts, pidx).tolist()
+    frames = []
+    start = 0
+    for (t_ns, m), n in zip(flat, counts.tolist(), strict=True):
+        agents = list(zip(m.agent_id.tolist(), m.x.tolist(), m.y.tolist(), m.theta.tolist(), m.vx.tolist(), m.vy.tolist(), names[start : start + n], m.kind.tolist(), strict=True))
+        frames.append(Frame(t_ns=t_ns, agents=agents))
+        start += n
+    return frames
 
 
 _POLICY_COLORS = ["#1f77b4", "#ff7f0e", "#2ca02c", "#d62728", "#9467bd", "#8c564b", "#e377c2", "#7f7f7f"]

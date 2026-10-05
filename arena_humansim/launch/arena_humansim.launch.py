@@ -135,6 +135,15 @@ def generate_launch_description():
         output="log",
     )
 
+    viz = Node(
+        package="arena_humansim_viz",
+        executable="arena_humansim_viz_node",
+        name="arena_humansim_viz",
+        namespace=LaunchConfiguration("namespace"),
+        parameters=[{"use_sim_time": LaunchConfiguration("use_sim_time")}],
+        output="screen",
+    )
+
     renderer_plan: dict = {}
 
     arguments = [
@@ -170,6 +179,7 @@ def generate_launch_description():
         *arguments,
         OpaqueFunction(function=_compute_record_dir, kwargs={"plan": renderer_plan}),
         map_tf,
+        viz,
         OpaqueFunction(function=_node_actions, kwargs={"declared": frozenset(a.name for a in arguments), "plan": renderer_plan}),
         OpaqueFunction(function=_rviz_action),
     ])

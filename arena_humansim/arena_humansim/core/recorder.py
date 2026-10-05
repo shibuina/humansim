@@ -7,7 +7,9 @@ from datetime import datetime
 from pathlib import Path
 
 import yaml
-from arena_humansim_msgs.msg import AgentStates as AgentStatesMsg
+from arena_humansim_msgs.msg import AgentFrame as AgentFrameMsg
+from arena_humansim_msgs.msg import AgentGestures as AgentGesturesMsg
+from arena_humansim_msgs.msg import AgentMeta as AgentMetaMsg
 from arena_humansim_msgs.msg import WorldGeometry as WorldGeometryMsg
 from rclpy.clock import Clock as RclClock
 from rclpy.clock import ClockType
@@ -66,9 +68,12 @@ class BagRecorder:
         )
 
         ns = node.get_namespace().rstrip("/")
+        latched = QoSProfile(depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL)
         topics = [
-            ("agent_states", "arena_humansim_msgs/msg/AgentStates", AgentStatesMsg, QoSProfile(depth=10)),
-            ("world_geometry", "arena_humansim_msgs/msg/WorldGeometry", WorldGeometryMsg, QoSProfile(depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL)),
+            ("agent_states", "arena_humansim_msgs/msg/AgentFrame", AgentFrameMsg, QoSProfile(depth=10)),
+            ("agent_meta", "arena_humansim_msgs/msg/AgentMeta", AgentMetaMsg, latched),
+            ("agent_gestures", "arena_humansim_msgs/msg/AgentGestures", AgentGesturesMsg, latched),
+            ("world_geometry", "arena_humansim_msgs/msg/WorldGeometry", WorldGeometryMsg, latched),
             ("/clock", "rosgraph_msgs/msg/Clock", Clock, QoSProfile(depth=10)),
         ]
         self._subs = []
@@ -82,6 +87,8 @@ class BagRecorder:
 
         self._closed = False
         self._first_policies: dict[int, str] | None = None
+        self._first_frame: tuple[list[int], list[int]] | None = None
+        self._policies: list[str] | None = None
         self._publisher_counts: dict[str, int] = {}
         self._contaminated = False
         self._manifest = record_dir / "recording.yaml"
@@ -138,16 +145,29 @@ class BagRecorder:
         except OSError as exc:
             self._node.get_logger().warning(f"could not write {self._manifest}: {exc}")
 
-    def _write(self, topic_name: str, msg: AgentStatesMsg | WorldGeometryMsg | Clock) -> None:
+    def _note_policies(self, msg: AgentFrameMsg | AgentMetaMsg) -> None:
+        if isinstance(msg, AgentMetaMsg):
+            self._policies = list(msg.policies)
+        elif self._first_frame is None:
+            self._first_frame = (list(msg.agent_id), list(msg.policy_idx))
+        if self._first_policies is not None or self._first_frame is None:
+            return
+        ids, pidx = self._first_frame
+        if ids and self._policies is None:
+            return
+        policies = self._policies or []
+        self._first_policies = {int(a): policies[p] if 0 <= p < len(policies) else "" for a, p in zip(ids, pidx, strict=True)}
+        self._write_manifest()
+
+    def _write(self, topic_name: str, msg: AgentFrameMsg | AgentMetaMsg | AgentGesturesMsg | WorldGeometryMsg | Clock) -> None:
         if self._closed:
             return
         if isinstance(msg, Clock):
             t = self._node.get_clock().now().nanoseconds
         else:
             t = int(msg.header.stamp.sec) * 1_000_000_000 + int(msg.header.stamp.nanosec)
-            if self._first_policies is None and isinstance(msg, AgentStatesMsg):
-                self._first_policies = {int(a.agent_id): str(a.policy) for a in msg.agents}
-                self._write_manifest()
+            if isinstance(msg, AgentFrameMsg | AgentMetaMsg):
+                self._note_policies(msg)
         self._writer.write(topic_name, serialize_message(msg), t)
 
     @property

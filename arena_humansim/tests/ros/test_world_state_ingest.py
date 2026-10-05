@@ -150,7 +150,7 @@ def test_external_entities_excluded_from_agent_states(system: RosTestSystem) -> 
     system.tick_manager(1)
 
     ext_aid = manager._external_entities[_EXT_ID].agent_id
-    published = {a.agent_id for a in manager._build_agent_states_msg().agents}
+    published = set(manager._build_agent_frame().agent_id)
     assert ped_aid in published
     assert ext_aid not in published
 
@@ -249,7 +249,7 @@ def test_bound_agent_included_in_agent_states(system: RosTestSystem) -> None:
     system.tick_manager(1)
 
     assert manager._external_entities[ped_aid].agent_id == ped_aid
-    published = {a.agent_id for a in manager._build_agent_states_msg().agents}
+    published = set(manager._build_agent_frame().agent_id)
     assert ped_aid in published
 
 
@@ -266,6 +266,6 @@ def test_ghost_spawn_unchanged_alongside_bound_agent(system: RosTestSystem) -> N
     assert ghost.saved_policy_idx is None
     assert ghost.agent_id != ped_aid
     assert manager._pool.n == 2
-    published = {a.agent_id for a in manager._build_agent_states_msg().agents}
+    published = set(manager._build_agent_frame().agent_id)
     assert ped_aid in published
     assert ghost.agent_id not in published

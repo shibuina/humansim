@@ -2,13 +2,15 @@ from __future__ import annotations
 
 from typing import cast
 
+import numpy as np
 import pytest
 
 pytest.importorskip("arena_humansim_msgs")
 pytest.importorskip("rclpy")
 
 from arena_humansim.core.agents.base import BaseAgent
-from arena_humansim.core.agent_manager import _MSG_BLOCK, _AgentStateMsgPool, _group_by
+from arena_humansim.core.agent_manager import _CMD_LABEL_IDX, _CMD_LABELS, _flat, _group_by
+from arena_humansim.utils.types import CommandType
 
 
 class _Tagged:
@@ -44,43 +46,26 @@ def test_group_by_single_item_per_key() -> None:
     assert {k: len(v) for k, v in groups.items()} == {"a": 1, "b": 1, "c": 1}
 
 
-def test_msg_pool_initial_capacity_matches_block() -> None:
-    pool = _AgentStateMsgPool()
-    msg = pool.get(_MSG_BLOCK)
-    assert len(msg.agents) == _MSG_BLOCK
+@pytest.mark.parametrize("n", [0, 1, 7, 16, 17, 80])
+def test_flat_returns_exactly_n_values(n: int) -> None:
+    out = _flat("d", np.arange(n, dtype=np.float64))
+    assert out.typecode == "d"
+    assert list(out) == [float(i) for i in range(n)]
 
 
-def test_msg_pool_grows_on_demand() -> None:
-    pool = _AgentStateMsgPool()
-    msg = pool.get(_MSG_BLOCK * 3 + 1)
-    assert len(msg.agents) == _MSG_BLOCK * 3 + 1
+def test_flat_reads_strided_columns() -> None:
+    pos = np.arange(12, dtype=np.float64).reshape(6, 2)
+    assert list(_flat("d", pos[:, 0])) == [0.0, 2.0, 4.0, 6.0, 8.0, 10.0]
+    assert list(_flat("d", pos[[4, 1], 1])) == [9.0, 3.0]
 
 
-def test_msg_pool_reuses_underlying_messages_under_watermark() -> None:
-    pool = _AgentStateMsgPool()
-    pool.get(_MSG_BLOCK * 4)
-    snapshot = [id(m) for m in pool._inner]
-    pool.get(_MSG_BLOCK)
-    pool.get(_MSG_BLOCK)
-    assert [id(m) for m in pool._inner] == snapshot
+@pytest.mark.parametrize(("code", "values"), [("B", [0, 1, 255]), ("H", [0, 7, 65535]), ("h", [-1, 0, 2]), ("i", [-5, 0, 1 << 30]), ("I", [0, 3, (1 << 32) - 1]), ("f", [0.5, -1.25, 100.0])])
+def test_flat_casts_to_the_message_element_type(code: str, values: list[float]) -> None:
+    out = _flat(code, np.array(values, dtype=np.float64 if code == "f" else np.int64))
+    assert out.typecode == code
+    assert list(out) == values
 
 
-def test_msg_pool_returns_same_msg_instance() -> None:
-    pool = _AgentStateMsgPool()
-    a = pool.get(4)
-    b = pool.get(4)
-    c = pool.get(4)
-    assert a is b is c
-
-
-def test_msg_pool_returns_exactly_n_agents() -> None:
-    pool = _AgentStateMsgPool()
-    for n in (0, 1, 7, _MSG_BLOCK, _MSG_BLOCK + 1, _MSG_BLOCK * 5):
-        msg = pool.get(n)
-        assert len(msg.agents) == n
-
-
-def test_msg_pool_frame_id_is_map() -> None:
-    pool = _AgentStateMsgPool()
-    assert pool.get(1).header.frame_id == "map"
-    assert pool.get(1).header.frame_id == "map"
+def test_cmd_label_table_covers_every_command_and_intr() -> None:
+    assert _CMD_LABELS == (*(c.name for c in CommandType), "INTR")
+    assert all(_CMD_LABELS[_CMD_LABEL_IDX[c]] == c.name for c in CommandType)

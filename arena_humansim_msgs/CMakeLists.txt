@@ -8,8 +8,12 @@ find_package(geometry_msgs REQUIRED)
 find_package(std_msgs REQUIRED)
 
 rosidl_generate_interfaces(${PROJECT_NAME}
+  "msg/AgentFrame.msg"
+  "msg/AgentGestures.msg"
+  "msg/AgentMeta.msg"
   "msg/AgentState.msg"
   "msg/AgentStates.msg"
+  "msg/AgentViz.msg"
   "msg/Gesture.msg"
   "msg/AgentTemplate.msg"
   "msg/FlowConfig.msg"

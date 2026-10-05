@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import array
 import math
 import time
 from collections import deque
@@ -10,8 +11,12 @@ from typing import Any
 import attrs
 import numpy as np
 import rclpy
+from arena_humansim_msgs.msg import AgentFrame as AgentFrameMsg
+from arena_humansim_msgs.msg import AgentGestures as AgentGesturesMsg
+from arena_humansim_msgs.msg import AgentMeta as AgentMetaMsg
 from arena_humansim_msgs.msg import AgentState as AgentStateMsg
 from arena_humansim_msgs.msg import AgentStates as AgentStatesMsg
+from arena_humansim_msgs.msg import AgentViz as AgentVizMsg
 from arena_humansim_msgs.msg import Gesture as GestureMsg
 from arena_humansim_msgs.msg import ObstacleConfig as ObstacleConfigMsg
 from arena_humansim_msgs.msg import Shape as ShapeMsg
@@ -50,6 +55,7 @@ from rclpy.node import Node
 from rclpy.parameter import Parameter
 from rclpy.qos import DurabilityPolicy, QoSProfile, ReliabilityPolicy
 from rosgraph_msgs.msg import Clock
+from std_msgs.msg import Header
 
 from arena_humansim.animation import MotionAnimation
 from arena_humansim.collision import CollisionResolver
@@ -74,7 +80,7 @@ from arena_humansim.core.recorder import BagRecorder, default_record_dir
 from arena_humansim.core.replay import ReplayManager, ReplayResult
 from arena_humansim.core.robot_services import RobotServiceAdvertiser
 from arena_humansim.core.spawn_scheduler import SpawnScheduler
-from arena_humansim.core.viz import MarkerPublisher, publish_agents, publish_behavior, publish_global_plan, publish_infrastructure, publish_interaction, publish_local_plan, publish_module_markers, publish_perception, publish_waypoints
+from arena_humansim.core.viz import MarkerPublisher, publish_infrastructure, publish_module_markers
 from arena_humansim.core.world_knowledge import FormationSpec, WorldKnowledge, WorldObject
 from arena_humansim.global_planner import GlobalPlanner
 from arena_humansim.local_planner import LocalPlanner
@@ -93,6 +99,7 @@ from arena_humansim.utils.types import (
     GestureIntent,
     HighLevelCommand,
     InteractionOutcome,
+    InteractionState,
     Pose2D,
     SeekSpec,
     Segments,
@@ -141,8 +148,6 @@ _RECONFIGURABLE_PARAMS = _TUNABLE_PARAMS | {
     "rtf",
 }
 
-_MSG_BLOCK = 16
-
 _EXTERNAL_TIMEOUT_S = 2.0
 _EXTERNAL_ADOPT_RADIUS = 1.0
 
@@ -168,17 +173,19 @@ class _ExternalEntity:
     vel: tuple[float, float] = (0.0, 0.0)
 
 
-class _AgentStateMsgPool:
-    def __init__(self) -> None:
-        self._inner: list[AgentStateMsg] = [AgentStateMsg() for _ in range(_MSG_BLOCK)]
-        self._msg = AgentStatesMsg()
-        self._msg.header.frame_id = "map"
+_NP_TYPES: dict[str, type[np.generic]] = {"B": np.uint8, "H": np.uint16, "h": np.int16, "i": np.int32, "I": np.uint32, "f": np.float32, "d": np.float64}
 
-    def get(self, n: int) -> AgentStatesMsg:
-        while len(self._inner) < n:
-            self._inner.extend(AgentStateMsg() for _ in range(_MSG_BLOCK))
-        self._msg.agents = self._inner[:n]
-        return self._msg
+_CMD_LABELS = (*(c.name for c in CommandType), "INTR")
+_CMD_LABEL_IDX = {c: i for i, c in enumerate(CommandType)}
+_INTR_LABEL_IDX = len(_CMD_LABELS) - 1
+
+_LATCHED_QOS = QoSProfile(depth=1, reliability=ReliabilityPolicy.RELIABLE, durability=DurabilityPolicy.TRANSIENT_LOCAL)
+
+
+def _flat(code: str, values: np.ndarray) -> array.array:
+    out = array.array(code)
+    out.frombytes(values.astype(_NP_TYPES[code]).tobytes())
+    return out
 
 
 def _group_by[K: Hashable](agents: Iterable[BaseAgent], key: Callable[[BaseAgent], K]) -> Iterable[tuple[K, list[BaseAgent]]]:
@@ -442,7 +449,10 @@ class AgentManager(Node):
         self._subsystem_epoch_ns: int = 0
         self._pending_scenario_spawns: deque[tuple[int, AgentStateMsg]] = deque()
         self._pending_stimuli: deque[tuple[int, int, str, float]] = deque()
-        self._agent_states_pool = _AgentStateMsgPool()
+        self._meta_dirty = True
+        self._meta_published: tuple | None = None
+        self._gestures_dirty = True
+        self._gestures_published: list[tuple[int, GestureIntent]] | None = None
         self._tick_phases: dict[str, float] = {}
         self._overrun_count: int = 0
         self._last_overrun_log: float = 0.0
@@ -454,9 +464,16 @@ class AgentManager(Node):
         self._next_agent_id: int = 1
 
         self._agent_states_pub = self.create_publisher(
-            AgentStatesMsg,
+            AgentFrameMsg,
             "agent_states",
             10,
+        )
+        self._agent_meta_pub = self.create_publisher(AgentMetaMsg, "agent_meta", _LATCHED_QOS)
+        self._agent_gestures_pub = self.create_publisher(AgentGesturesMsg, "agent_gestures", _LATCHED_QOS)
+        self._viz_state_pub = self.create_publisher(
+            AgentVizMsg,
+            "viz_state",
+            QoSProfile(depth=10, reliability=ReliabilityPolicy.RELIABLE, durability=DurabilityPolicy.VOLATILE),
         )
 
         self._world_geometry_pub = self.create_publisher(
@@ -726,8 +743,10 @@ class AgentManager(Node):
         if level == self._publish_markers:
             return
         self._publish_markers = level
-        if level == 0 and self._marker_pub is not None:
-            self._marker_pub.forget_all()
+        if level == 0:
+            self._viz_state_pub.publish(AgentVizMsg(header=self._header()))
+            if self._marker_pub is not None:
+                self._marker_pub.forget_all()
         if level > 0 and self._marker_pub is None:
             self._marker_pub = MarkerPublisher(self)
 
@@ -804,6 +823,7 @@ class AgentManager(Node):
         self._policies = [self._policies[i] for i in keep]
         self._policy_names = [self._policy_names[i] for i in keep]
         self._policy_name_to_idx = {name: i for i, name in enumerate(self._policy_names)}
+        self._meta_dirty = True
 
         global_planners = [m for m in self._module_pool.values() if isinstance(m, GlobalPlanner)]
         dropped += [p for p in global_planners if p is not self._global_planner and not any(a.global_planner is p for a in agents)]
@@ -842,6 +862,7 @@ class AgentManager(Node):
         self._policies.append(planner)
         self._policy_names.append(name)
         self._policy_name_to_idx[name] = idx
+        self._meta_dirty = True
         return idx
 
     def _resolve_perception_layer(self, name: str) -> Perception:
@@ -1215,6 +1236,7 @@ class AgentManager(Node):
             agent.movement = BehaviorTreeMovement()
 
     def _remove_agent(self, aid: int) -> None:
+        self._mark_roster_dirty()
         self._agents.pop(aid, None)
         self._prone.discard(aid)
         self._parked_from.pop(aid, None)
@@ -1321,6 +1343,7 @@ class AgentManager(Node):
             idx = self._pool.add_agent(agent)
             self._pool.policy_idx[idx] = self._default_policy_idx
             self._pool_agent_ids.append(aid)
+            self._mark_roster_dirty()
             self._compile_behavior_tree(agent)
             spawn_req.lifetime.agent_id = aid
             self._despawn_monitor.register(aid, spawn_req.lifetime)
@@ -1554,15 +1577,17 @@ class AgentManager(Node):
         self._advance_waypoints(agents, pool)
         self._apply_postures(agents, pool)
         self._update_animation_states()
-        msg = self._build_agent_states_msg()
-        self._agent_states_pub.publish(msg)
+        frame = self._build_agent_frame()
+        self._agent_states_pub.publish(frame)
+        if self._meta_dirty:
+            self._publish_agent_meta(frame.header)
+        if self._gestures_dirty or is_bt_tick:
+            self._publish_agent_gestures(frame.header)
 
         if self._marker_pub is not None and self._publish_markers > 0:
             pool.sync_back(agents)
             mlvl = self._publish_markers
-            publish_agents(self._marker_pub, agents)
-            publish_behavior(self._marker_pub, agents, self._high_level_cmds, interactions)
-            publish_interaction(self._marker_pub, agents, interactions)
+            self._viz_state_pub.publish(self._build_agent_viz(agents, interactions))
             publish_infrastructure(
                 self._marker_pub,
                 self._spawn_scheduler._sources,
@@ -1572,16 +1597,6 @@ class AgentManager(Node):
                 self._obstacles,
             )
             if mlvl >= 2:
-                velocities = {int(pool.agent_ids[i]): (float(pool.vel[i, 0]), float(pool.vel[i, 1])) for i in range(n)}
-                publish_perception(self._marker_pub, agents)
-                publish_global_plan(
-                    self._marker_pub,
-                    agents,
-                    self._high_level_cmds,
-                    self._cached_intermediate_goals,
-                )
-                publish_local_plan(self._marker_pub, agents, velocities)
-                publish_waypoints(self._marker_pub, agents)
                 modules = list(self._perception_cache.values())
                 modules.append(self._global_planner)
                 modules.append(self._local_planner)
@@ -2048,8 +2063,10 @@ class AgentManager(Node):
                 else:
                     entity = _ExternalEntity(agent_id=self._spawn_external_agent(agent_msg))
             self._external_entities[agent_msg.agent_id] = entity
-        if agent_msg.name:
+            self._mark_roster_dirty()
+        if agent_msg.name and self._agent_name_to_id.get(agent_msg.name) != entity.agent_id:
             self._agent_name_to_id[agent_msg.name] = entity.agent_id
+            self._meta_dirty = True
         entity.last_seen = self._tick_count
         radius = agent_msg.radius if agent_msg.radius > 0 else 0.3
         self._teleport_agent(entity.agent_id, agent_msg.pose.x, agent_msg.pose.y, agent_msg.pose.theta, radius)
@@ -2093,6 +2110,7 @@ class AgentManager(Node):
         idx = self._pool.add_agent(agent)
         self._pool.kind[idx] = KIND_ROBOT
         self._pool_agent_ids.append(aid)
+        self._mark_roster_dirty()
         self._behavior_trees[aid] = None
         return aid
 
@@ -2102,6 +2120,7 @@ class AgentManager(Node):
             if self._tick_count - entity.last_seen <= self._external_timeout_ticks:
                 continue
             del self._external_entities[ext_id]
+            self._mark_roster_dirty()
             if entity.owned:
                 if entity.agent_id in self._agents:
                     self._remove_agent(entity.agent_id)
@@ -2170,48 +2189,251 @@ class AgentManager(Node):
         n = pool.n
         pool.animation_state[:n] = locomotion_states(pool.vel[:n], pool.has_goal[:n], pool.desired_vel[:n])
 
-    def _build_agent_states_msg(self) -> AgentStatesMsg:
-        pool = self._pool
-        n = pool.n
-        external = {e.agent_id for e in self._external_entities.values() if e.saved_policy_idx is None}
-        own_idxs = [i for i in range(n) if int(pool.agent_ids[i]) not in external] if external else list(range(n))
-        msg = self._agent_states_pool.get(len(own_idxs))
+    def _mark_roster_dirty(self) -> None:
+        self._meta_dirty = True
+        self._gestures_dirty = True
+
+    def _force_agent_meta(self) -> None:
+        """Republish AgentMeta at the next tick even if its content is unchanged."""
+        self._meta_published = None
+        self._meta_dirty = True
+
+    def _own_rows(self) -> np.ndarray:
+        """Pool rows of the engine's own agents, external mirrors excluded."""
+        n = self._pool.n
+        external = [e.agent_id for e in self._external_entities.values() if e.saved_policy_idx is None]
+        if not external:
+            return np.arange(n)
+        return np.flatnonzero(~np.isin(self._pool.agent_ids[:n], external))
+
+    def _header(self) -> Header:
         if self._mode == self.MODE_SUBSYSTEM:
             # covered time on the clock epoch: the stamp advances only as ticks
             # actually complete, so consumers (and lockstep gates) see true
             # coverage instead of a fresh-looking stamp masking engine lag
             ns = self._subsystem_epoch_ns + self._sim_time_ns
-            msg.header.stamp.sec = int(ns // int(1e9))
-            msg.header.stamp.nanosec = int(ns % int(1e9))
         else:
-            msg.header.stamp.sec = int(self._sim_time_ns // int(1e9))
-            msg.header.stamp.nanosec = int(self._sim_time_ns % int(1e9))
-        if not own_idxs:
-            return msg
+            ns = self._sim_time_ns
+        header = Header(frame_id="map")
+        header.stamp.sec = int(ns // int(1e9))
+        header.stamp.nanosec = int(ns % int(1e9))
+        return header
+
+    def _build_agent_frame(self) -> AgentFrameMsg:
+        pool = self._pool
+        rows = self._own_rows()
+        pos = pool.pos[rows]
+        vel = pool.vel[rows]
+        pidx = pool.policy_idx[rows]
+        msg = AgentFrameMsg(header=self._header())
+        msg.agent_id = _flat("i", pool.agent_ids[rows])
+        msg.x = _flat("d", pos[:, 0])
+        msg.y = _flat("d", pos[:, 1])
+        msg.theta = _flat("d", pool.theta[rows])
+        msg.vx = _flat("d", vel[:, 0])
+        msg.vy = _flat("d", vel[:, 1])
+        msg.desired_velocity = _flat("d", pool.desired_vel[rows])
+        msg.radius = _flat("d", pool.agent_radius[rows])
+        msg.kind = _flat("B", pool.kind[rows])
+        msg.animation_state = _flat("B", pool.animation_state[rows])
+        msg.policy_idx = _flat("h", np.where((pidx >= 0) & (pidx < len(self._policy_names)), pidx, -1))
+        return msg
+
+    def _publish_agent_meta(self, header: Header) -> None:
+        self._meta_dirty = False
+        ids = self._pool.agent_ids[self._own_rows()].tolist()
         names: dict[int, str] = {}
         for name, aid in self._agent_name_to_id.items():
             names.setdefault(aid, name)
-        for j, i in enumerate(own_idxs):
-            a = msg.agents[j]
-            a.agent_id = int(pool.agent_ids[i])
-            a.pose.x = float(pool.pos[i, 0])
-            a.pose.y = float(pool.pos[i, 1])
-            a.pose.theta = float(pool.theta[i])
-            a.velocity.x = float(pool.vel[i, 0])
-            a.velocity.y = float(pool.vel[i, 1])
-            a.velocity.z = 0.0
-            a.desired_velocity = float(pool.desired_vel[i])
-            a.radius = float(pool.agent_radius[i])
-            a.kind = int(pool.kind[i])
-            a.animation_state = int(pool.animation_state[i])
-            pidx = int(pool.policy_idx[i])
-            a.policy = self._policy_names[pidx] if 0 <= pidx < len(self._policy_names) else ""
-            a.name = names.get(a.agent_id, "")
-            agent = self._agents.get(a.agent_id)
-            a.handedness = agent.params.handedness if agent is not None else ""
+        agents = [self._agents.get(aid) for aid in ids]
+        content = (
+            tuple(self._policy_names),
+            tuple(ids),
+            tuple(names.get(aid, "") for aid in ids),
+            tuple(agent.params.handedness if agent is not None else "" for agent in agents),
+        )
+        if content == self._meta_published:
+            return
+        self._meta_published = content
+        policies, _, agent_names, handedness = content
+        msg = AgentMetaMsg(header=header)
+        msg.policies = list(policies)
+        msg.agent_id = array.array("i", ids)
+        msg.name = list(agent_names)
+        msg.handedness = list(handedness)
+        self._agent_meta_pub.publish(msg)
+
+    def _publish_agent_gestures(self, header: Header) -> None:
+        self._gestures_dirty = False
+        owned: list[tuple[int, GestureIntent]] = []
+        for aid in self._pool.agent_ids[self._own_rows()].tolist():
+            agent = self._agents.get(aid)
             mv = agent.movement if agent is not None else None
-            intents = mv.gestures if isinstance(mv, BehaviorTreeMovement) else ()
-            a.gestures = [_gesture_msg(g) for g in intents]
+            if isinstance(mv, BehaviorTreeMovement):
+                owned.extend((aid, g) for g in mv.gestures)
+        if owned == self._gestures_published:
+            return
+        self._gestures_published = owned
+        msg = AgentGesturesMsg(header=header)
+        msg.agent_id = array.array("i", [aid for aid, _ in owned])
+        msg.gestures = [_gesture_msg(g) for _, g in owned]
+        self._agent_gestures_pub.publish(msg)
+
+    def _build_agent_viz(self, agents: list[BaseAgent], interactions: dict[int, InteractionState]) -> AgentVizMsg:
+        """Marker inputs for every pool agent, reads agent states synced back from the pool."""
+        pool = self._pool
+        n = pool.n
+        full = self._publish_markers >= 2
+        cmds = self._high_level_cmds
+        msg = AgentVizMsg(header=self._header(), level=self._publish_markers)
+        msg.agent_id = _flat("i", pool.agent_ids[:n])
+        msg.x = _flat("d", pool.pos[:n, 0])
+        msg.y = _flat("d", pool.pos[:n, 1])
+        msg.theta = _flat("d", pool.theta[:n])
+        msg.vx = _flat("d", pool.vel[:n, 0])
+        msg.vy = _flat("d", pool.vel[:n, 1])
+        msg.radius = array.array("d", [agent.params.agent_radius for agent in agents])
+        msg.kind = _flat("B", pool.kind[:n])
+
+        in_interaction = {pid for inter in interactions.values() for pid in inter.participants}
+        cmd_ids: list[int] = []
+        cmd_idx: list[int] = []
+        need_names: dict[str, int] = {}
+        need_ids: list[int] = []
+        need_name_idx: list[int] = []
+        need_slot: list[int] = []
+        need_value: list[float] = []
+        obs_ids: list[int] = []
+        obs_slot: list[int] = []
+        obs_x: list[float] = []
+        obs_y: list[float] = []
+        path_ids: list[int] = []
+        path_offset = [0]
+        path_x: list[float] = []
+        path_y: list[float] = []
+        igoal_ids: list[int] = []
+        igoal_x: list[float] = []
+        igoal_y: list[float] = []
+        goal_ids: list[int] = []
+        goal_x: list[float] = []
+        goal_y: list[float] = []
+        goal_theta: list[float] = []
+        wp_ids: list[int] = []
+        wp_offset = [0]
+        wp_x: list[float] = []
+        wp_y: list[float] = []
+        wp_active: list[int] = []
+        wp_active_radius: list[float] = []
+
+        cached_paths: dict[int, list[Pose2D]] = {}
+        if full:
+            seen: set[int] = set()
+            for agent in agents:
+                pid = id(agent.global_planner)
+                if pid not in seen:
+                    seen.add(pid)
+                    cached_paths.update(agent.global_planner.get_cached_paths())
+
+        for agent in agents:
+            aid = agent.state.agent_id
+            cmd = cmds.get(aid)
+            if cmd is not None:
+                cmd_ids.append(aid)
+                cmd_idx.append(_INTR_LABEL_IDX if aid in in_interaction and cmd.type == CommandType.NAVIGATE else _CMD_LABEL_IDX[CommandType(cmd.type)])
+            if agent.needs is not None:
+                for i, (name, need) in enumerate(agent.needs.needs.items()):
+                    need_ids.append(aid)
+                    need_name_idx.append(need_names.setdefault(name, len(need_names)))
+                    need_slot.append(i)
+                    need_value.append(need.value)
+            if not full:
+                continue
+            if agent.belief is not None:
+                for i, obs in enumerate(agent.belief.observed_agents):
+                    obs_ids.append(aid)
+                    obs_slot.append(i)
+                    obs_x.append(obs.pose.x)
+                    obs_y.append(obs.pose.y)
+            path = cached_paths.get(aid)
+            if path and len(path) > 1:
+                path_ids.append(aid)
+                path_x.extend(wp.x for wp in path)
+                path_y.extend(wp.y for wp in path)
+                path_offset.append(len(path_x))
+            ig = self._cached_intermediate_goals.get(aid)
+            if ig is not None:
+                igoal_ids.append(aid)
+                igoal_x.append(ig.x)
+                igoal_y.append(ig.y)
+            if cmd is not None:
+                goal_ids.append(aid)
+                goal_x.append(cmd.target_pose.x)
+                goal_y.append(cmd.target_pose.y)
+                goal_theta.append(cmd.target_pose.theta)
+            mv = agent.movement
+            if isinstance(mv, WaypointMovement) and mv.waypoints:
+                wp_ids.append(aid)
+                wp_x.extend(wp.x for wp in mv.waypoints)
+                wp_y.extend(wp.y for wp in mv.waypoints)
+                wp_offset.append(len(wp_x))
+                wp_active.append(mv.index)
+                r = mv.radii[mv.index] if mv.radii and mv.index < len(mv.radii) else 0.3
+                wp_active_radius.append(max(r, 0.0))
+
+        msg.cmd_labels = list(_CMD_LABELS)
+        msg.cmd_agent_id = array.array("i", cmd_ids)
+        msg.cmd_label_idx = array.array("B", cmd_idx)
+        msg.need_names = list(need_names)
+        msg.need_agent_id = array.array("i", need_ids)
+        msg.need_name_idx = array.array("B", need_name_idx)
+        msg.need_slot = array.array("B", need_slot)
+        msg.need_value = array.array("f", need_value)
+
+        inter_ids: list[int] = []
+        inter_labels: list[str] = []
+        inter_offset = [0]
+        inter_parts: list[int] = []
+        for iid, inter in interactions.items():
+            parts = inter.participants
+            lbl = f"{InteractionType(inter.type).kind.label} [{len(parts)}p"
+            if inter.contract.queue:
+                lbl += f" +{len(inter.contract.queue)}q"
+            lbl += "]"
+            inter_ids.append(iid)
+            inter_labels.append(lbl)
+            inter_parts.extend(parts)
+            inter_offset.append(len(inter_parts))
+        msg.interaction_id = array.array("i", inter_ids)
+        msg.interaction_label = inter_labels
+        msg.interaction_offset = array.array("I", inter_offset)
+        msg.interaction_participants = array.array("i", inter_parts)
+
+        if not full:
+            return msg
+        msg.vision_range = _flat("d", pool.vision_range[:n])
+        msg.vision_fov = _flat("d", pool.vision_fov[:n])
+        msg.proximity_sense = _flat("d", pool.proximity_sense[:n])
+        msg.observed_agent_id = array.array("i", obs_ids)
+        msg.observed_slot = array.array("H", obs_slot)
+        msg.observed_x = array.array("d", obs_x)
+        msg.observed_y = array.array("d", obs_y)
+        msg.path_agent_id = array.array("i", path_ids)
+        msg.path_offset = array.array("I", path_offset)
+        msg.path_x = array.array("d", path_x)
+        msg.path_y = array.array("d", path_y)
+        msg.igoal_agent_id = array.array("i", igoal_ids)
+        msg.igoal_x = array.array("d", igoal_x)
+        msg.igoal_y = array.array("d", igoal_y)
+        msg.goal_agent_id = array.array("i", goal_ids)
+        msg.goal_x = array.array("d", goal_x)
+        msg.goal_y = array.array("d", goal_y)
+        msg.goal_theta = array.array("d", goal_theta)
+        msg.wp_agent_id = array.array("i", wp_ids)
+        msg.wp_offset = array.array("I", wp_offset)
+        msg.wp_x = array.array("d", wp_x)
+        msg.wp_y = array.array("d", wp_y)
+        msg.wp_active = array.array("I", wp_active)
+        msg.wp_active_radius = array.array("d", wp_active_radius)
         return msg
 
     def _spawn_agents_callback(
@@ -2265,6 +2487,7 @@ class AgentManager(Node):
             self._pool.kind[idx] = kind
             self._pool.policy_idx[idx] = policy_idx
             self._pool_agent_ids.append(aid)
+            self._mark_roster_dirty()
 
             if agent_msg.name:
                 self._agent_name_to_id[agent_msg.name] = aid
@@ -2310,6 +2533,8 @@ class AgentManager(Node):
             self._agents.clear()
             self._pool_agent_ids.clear()
             self._pool.reset()
+            self._force_agent_meta()
+            self._mark_roster_dirty()
             self._high_level_cmds.clear()
             self._behavior_trees.clear()
             self._agent_name_to_id.clear()
@@ -2345,6 +2570,7 @@ class AgentManager(Node):
         if not request.soft:
             self._wipe()
         self._apply_parameters()
+        self._force_agent_meta()
         response.success = True
         response.message = "Parameters applied" if request.soft else "Simulation reset"
         self._logger.info(response.message)
@@ -2354,6 +2580,7 @@ class AgentManager(Node):
         self._agents.clear()
         self._pool_agent_ids.clear()
         self._pool.reset()
+        self._mark_roster_dirty()
         self._high_level_cmds.clear()
         self._behavior_trees.clear()
         self._agent_name_to_id.clear()
@@ -2425,6 +2652,7 @@ class AgentManager(Node):
         else:
             mv = WaypointMovement(waypoints=waypoints, radii=radii, mode=mode)
             agent.movement = mv
+            self._gestures_dirty = True
 
         idx = self._pool._id_to_idx.get(aid)
         if waypoints:

@@ -10,19 +10,15 @@ from rclpy.qos import DurabilityPolicy, QoSProfile, ReliabilityPolicy
 from std_msgs.msg import ColorRGBA
 from visualization_msgs.msg import Marker, MarkerArray
 
-from arena_humansim.core.interaction_kinds import InteractionType
-from arena_humansim.utils.types import CommandType
-
 if TYPE_CHECKING:
     from collections.abc import Iterable
 
     from arena_humansim.core.agent_manager import ObstacleData
-    from arena_humansim.core.agents import BaseAgent
     from arena_humansim.core.world_knowledge import WorldObject
     from arena_humansim.global_planner import GlobalPlanner
     from arena_humansim.local_planner import LocalPlanner
     from arena_humansim.perception import Perception
-    from arena_humansim.utils.types import HighLevelCommand, InteractionState, Pose2D, Shape, SinkConfig, SourceConfig
+    from arena_humansim.utils.types import Pose2D, Shape, SinkConfig, SourceConfig
 
 _FRAME = "map"
 _MISSING = object()
@@ -111,35 +107,12 @@ def cube(ns: str, mid: int, stamp: Time, x: float, y: float, z: float, sx: float
     return m
 
 
-_C_CONE = rgba(0.2, 0.6, 1.0, 0.12)
-_C_PROX = _C_CONE
-_C_OBS = rgba(0.2, 0.8, 0.2, 0.4)
-_C_CMD = rgba(1.0, 1.0, 1.0, 0.9)
-_C_PATH = rgba(0.4, 0.9, 0.4, 0.5)
-_C_IGOAL = rgba(0.1, 1.0, 0.1, 0.8)
-_C_GOAL = rgba(1.0, 0.3, 0.3, 0.8)
-_C_VEL = rgba(0.0, 0.7, 1.0, 0.9)
-_C_ILINK = rgba(0.9, 0.9, 0.2, 0.6)
-_C_ILABEL = rgba(1.0, 1.0, 0.5, 0.9)
-_C_WP = rgba(0.7, 0.5, 1.0, 0.5)
-_C_WP_ACT = rgba(1.0, 0.5, 1.0, 0.8)
-_C_WP_RAD = rgba(0.7, 0.5, 1.0, 0.15)
 _C_SRC = rgba(0.2, 1.0, 0.5, 0.4)
 _C_SINK = rgba(1.0, 0.3, 0.3, 0.3)
 _C_WALL = rgba(0.6, 0.0, 0.0, 0.6)
 _C_WOBJ = rgba(0.3, 0.7, 1.0, 0.5)
 _C_OBST = rgba(0.8, 0.5, 0.1, 0.4)
 _C_OBST_LBL = rgba(1.0, 0.8, 0.3, 0.9)
-_C_BODY_HUMAN = rgba(0.95, 0.75, 0.55, 0.9)
-_C_BODY_ROBOT = rgba(0.4, 0.4, 0.5, 0.9)
-_C_HEADING = rgba(0.1, 0.1, 0.1, 0.9)
-_NEED_COLORS = [
-    rgba(0.2, 0.8, 0.2, 0.8),
-    rgba(0.8, 0.8, 0.2, 0.8),
-    rgba(0.2, 0.6, 1.0, 0.8),
-    rgba(0.9, 0.4, 0.1, 0.8),
-    rgba(0.8, 0.2, 0.8, 0.8),
-]
 
 
 def _shape_outline(pose: Pose2D, shape: Shape) -> list[tuple[float, float]]:
@@ -310,124 +283,6 @@ class MarkerPublisher:
         self._dirty.clear()
 
 
-def publish_agents(pub: MarkerPublisher, agents: Iterable[BaseAgent]) -> None:
-    from arena_humansim.utils.types import AgentKind
-
-    body_view = pub.view("agent_body", Marker.CYLINDER)
-    head_view = pub.view("agent_heading", Marker.ARROW)
-    for agent in agents:
-        aid = agent.state.agent_id
-        pose = agent.state.pose
-        radius = agent.params.agent_radius
-        is_robot = agent.state.kind == AgentKind.ROBOT
-        height = 0.5 if is_robot else 1.7
-        color = _C_BODY_ROBOT if is_robot else _C_BODY_HUMAN
-
-        m, new = body_view.get(aid)
-        m.pose.position.x, m.pose.position.y = pose.x, pose.y
-        m.pose.position.z = height / 2.0
-        m.pose.orientation.z = math.sin(pose.theta / 2.0)
-        m.pose.orientation.w = math.cos(pose.theta / 2.0)
-        m.scale.x = m.scale.y = radius * 2.0
-        m.scale.z = height
-        if new:
-            m.color = color
-
-        m, new = head_view.get(aid)
-        if new:
-            m.scale.x, m.scale.y, m.scale.z = 0.03, 0.06, 0.06
-            m.color = _C_HEADING
-            m.points = [Point(), Point()]
-        tip_len = radius + 0.2
-        m.points[0].x, m.points[0].y, m.points[0].z = pose.x, pose.y, height + 0.05
-        m.points[1].x = pose.x + tip_len * math.cos(pose.theta)
-        m.points[1].y = pose.y + tip_len * math.sin(pose.theta)
-        m.points[1].z = height + 0.05
-
-
-def publish_behavior(
-    pub: MarkerPublisher,
-    agents: Iterable[BaseAgent],
-    cmds: dict[int, HighLevelCommand],
-    interactions: dict[int, InteractionState] | None = None,
-) -> None:
-    in_interaction: set[int] = set()
-    if interactions:
-        for inter in interactions.values():
-            in_interaction.update(inter.participants)
-    cmd_view = pub.view("cmd", Marker.TEXT_VIEW_FACING)
-    for agent in agents:
-        aid = agent.state.agent_id
-        x, y = agent.state.pose.x, agent.state.pose.y
-        cmd = cmds.get(aid)
-        if cmd is not None:
-            m, new = cmd_view.get(aid)
-            if new:
-                m.color = _C_CMD
-            m.pose.position.x, m.pose.position.y, m.pose.position.z = x, y, 0.9
-            m.scale.z = 0.2
-            label = "INTR" if aid in in_interaction and cmd.type == CommandType.NAVIGATE else CommandType(cmd.type).name
-            m.text = label
-        if agent.needs is not None:
-            for i, (name, need) in enumerate(agent.needs.needs.items()):
-                clr = _NEED_COLORS[i % len(_NEED_COLORS)]
-                bar_ns = f"needs_{name}"
-                bar_view = pub.view(bar_ns, Marker.CUBE)
-                m, new = bar_view.get(aid)
-                if new:
-                    m.scale.y = m.scale.z = 0.05
-                    m.color = clr
-                m.pose.position.x = x + 0.25
-                m.pose.position.y = y + 0.15 * i - 0.15
-                m.pose.position.z = 0.7
-                m.scale.x = max(0.3 * need.value / 100.0, 0.01)
-
-                lbl_ns = f"needs_{name}_label"
-                lbl_view = pub.view(lbl_ns, Marker.TEXT_VIEW_FACING)
-                m, new = lbl_view.get(aid)
-                if new:
-                    m.color = clr
-                    m.scale.z = 0.1
-                m.pose.position.x = x + 0.5
-                m.pose.position.y = y + 0.15 * i - 0.15
-                m.pose.position.z = 0.7
-                m.text = f"{name}:{need.value:.0f}"
-
-
-def publish_interaction(pub: MarkerPublisher, agents: Iterable[BaseAgent], interactions: dict[int, InteractionState]) -> None:
-    amap = {a.state.agent_id: a for a in agents}
-    links_view = pub.view("interaction_links", Marker.LINE_LIST)
-    label_view = pub.view("interaction_label", Marker.TEXT_VIEW_FACING)
-    for iid, inter in interactions.items():
-        parts = inter.participants
-        if len(parts) >= 2:
-            m, new = links_view.get(iid)
-            if new:
-                m.scale.x = 0.03
-                m.color = _C_ILINK
-            m.points.clear()
-            for i in range(len(parts)):
-                for j in range(i + 1, len(parts)):
-                    a1, a2 = amap.get(parts[i]), amap.get(parts[j])
-                    if a1 and a2:
-                        m.points.append(Point(x=a1.state.pose.x, y=a1.state.pose.y, z=0.3))
-                        m.points.append(Point(x=a2.state.pose.x, y=a2.state.pose.y, z=0.3))
-        live = [p for p in parts if p in amap]
-        if live:
-            cx = sum(amap[p].state.pose.x for p in live) / len(live)
-            cy = sum(amap[p].state.pose.y for p in live) / len(live)
-            lbl = f"{InteractionType(inter.type).kind.label} [{len(parts)}p"
-            if inter.contract.queue:
-                lbl += f" +{len(inter.contract.queue)}q"
-            lbl += "]"
-            m, new = label_view.get(iid)
-            if new:
-                m.color = _C_ILABEL
-                m.scale.z = 0.2
-            m.pose.position.x, m.pose.position.y, m.pose.position.z = cx, cy, 0.5
-            m.text = lbl
-
-
 def publish_infrastructure(
     pub: MarkerPublisher,
     sources: dict[str, SourceConfig],
@@ -586,163 +441,6 @@ def publish_infrastructure(
             m.text = label
 
 
-def publish_perception(pub: MarkerPublisher, agents: Iterable[BaseAgent]) -> None:
-    cone_view = pub.view("vision_cone", Marker.TRIANGLE_LIST)
-    prox_view = pub.view("proximity_sense", Marker.TRIANGLE_LIST)
-    obs_view = pub.view("observed", Marker.ARROW)
-    for agent in agents:
-        aid = agent.state.agent_id
-        p = agent.params.perception
-        pose = agent.state.pose
-        m, new = cone_view.get(aid)
-        if new:
-            m.scale.x = m.scale.y = m.scale.z = 1.0
-            m.color = _C_CONE
-        m.points.clear()
-        segs = 12
-        half = math.radians(min(p.vision_fov, 360.0) * 0.5)
-        h = pose.theta
-        ox, oy, z = pose.x, pose.y, 0.02
-        for si in range(segs):
-            a0 = h - half + 2.0 * half * si / segs
-            a1 = h - half + 2.0 * half * (si + 1) / segs
-            m.points.append(Point(x=ox, y=oy, z=z))
-            m.points.append(Point(x=ox + p.vision_range * math.cos(a0), y=oy + p.vision_range * math.sin(a0), z=z))
-            m.points.append(Point(x=ox + p.vision_range * math.cos(a1), y=oy + p.vision_range * math.sin(a1), z=z))
-        m, new = prox_view.get(aid)
-        if new:
-            m.scale.x = m.scale.y = m.scale.z = 1.0
-            m.color = _C_PROX
-        m.points.clear()
-        segs = 24
-        ox, oy, z = pose.x, pose.y, 0.02
-        radius = p.proximity_sense
-        for si in range(segs):
-            a0 = 2.0 * math.pi * si / segs
-            a1 = 2.0 * math.pi * (si + 1) / segs
-            m.points.append(Point(x=ox, y=oy, z=z))
-            m.points.append(Point(x=ox + radius * math.cos(a0), y=oy + radius * math.sin(a0), z=z))
-            m.points.append(Point(x=ox + radius * math.cos(a1), y=oy + radius * math.sin(a1), z=z))
-        if agent.belief is not None:
-            for i, obs in enumerate(agent.belief.observed_agents):
-                m, new = obs_view.get(aid * 100 + i)
-                if new:
-                    m.scale.x, m.scale.y, m.scale.z = 0.015, 0.03, 0.03
-                    m.color = _C_OBS
-                    m.points = [Point(), Point()]
-                m.points[0].x, m.points[0].y, m.points[0].z = pose.x, pose.y, 0.1
-                m.points[1].x = obs.pose.x
-                m.points[1].y = obs.pose.y
-                m.points[1].z = 0.1
-
-
-def publish_global_plan(pub: MarkerPublisher, agents: Iterable[BaseAgent], cmds: dict[int, HighLevelCommand], intermediate_goals: dict[int, Pose2D]) -> None:
-    path_view = pub.view("path", Marker.LINE_STRIP)
-    igoal_view = pub.view("igoal", Marker.SPHERE)
-    goal_view = pub.view("goal", Marker.ARROW)
-
-    cached_paths: dict[int, list] = {}
-    seen: set[int] = set()
-    for agent in agents:
-        pid = id(agent.global_planner)
-        if pid not in seen:
-            seen.add(pid)
-            cached_paths.update(agent.global_planner.get_cached_paths())
-
-    for agent in agents:
-        aid = agent.state.agent_id
-        path = cached_paths.get(aid)
-        if path and len(path) > 1:
-            m, new = path_view.get(aid)
-            if new:
-                m.scale.x = 0.02
-                m.color = _C_PATH
-            m.points = [Point(x=wp.x, y=wp.y, z=0.05) for wp in path]
-
-        ig = intermediate_goals.get(aid)
-        if ig is not None:
-            gx = ig.x
-            gy = ig.y
-            m, new = igoal_view.get(aid)
-            if new:
-                m.scale.x = m.scale.y = m.scale.z = 0.1 * 2.0
-                m.color = _C_IGOAL
-            m.pose.position.x, m.pose.position.y, m.pose.position.z = gx, gy, 0.1
-
-        cmd = cmds.get(aid)
-        if cmd is not None:
-            tp = cmd.target_pose
-            m, new = goal_view.get(aid)
-            if new:
-                m.scale.x, m.scale.y, m.scale.z = 0.05, 0.1, 0.08
-                m.color = _C_GOAL
-                m.points = [Point(), Point()]
-            m.points[0].x, m.points[0].y, m.points[0].z = tp.x, tp.y, 0.1
-            m.points[1].x = tp.x + 0.3 * math.cos(tp.theta)
-            m.points[1].y = tp.y + 0.3 * math.sin(tp.theta)
-            m.points[1].z = 0.1
-
-
-def publish_local_plan(pub: MarkerPublisher, agents: Iterable[BaseAgent], velocities: dict[int, tuple[float, float]]) -> None:
-    vel_view = pub.view("vel", Marker.ARROW)
-    for agent in agents:
-        aid = agent.state.agent_id
-        vel = velocities.get(aid)
-        if vel is None:
-            continue
-        vx, vy = vel
-        if abs(vx) < 1e-4 and abs(vy) < 1e-4:
-            continue
-        m, new = vel_view.get(aid)
-        if new:
-            m.scale.x, m.scale.y, m.scale.z = 0.03, 0.06, 0.06
-            m.color = _C_VEL
-            m.points = [Point(), Point()]
-        m.points[0].x, m.points[0].y, m.points[0].z = agent.state.pose.x, agent.state.pose.y, 0.1
-        m.points[1].x = agent.state.pose.x + vx
-        m.points[1].y = agent.state.pose.y + vy
-        m.points[1].z = 0.1
-
-
-def publish_waypoints(pub: MarkerPublisher, agents: Iterable[BaseAgent]) -> None:
-    from arena_humansim.utils.types import WaypointMovement
-
-    wp_path_view = pub.view("wp_path", Marker.LINE_STRIP)
-    wp_view = pub.view("wp", Marker.SPHERE)
-    wp_rad_view = pub.view("wp_rad", Marker.CYLINDER)
-    for agent in agents:
-        mv = agent.movement
-        if not isinstance(mv, WaypointMovement) or not mv.waypoints:
-            continue
-        aid = agent.state.agent_id
-        wps = mv.waypoints
-        if len(wps) > 1:
-            m, new = wp_path_view.get(aid)
-            if new:
-                m.scale.x = 0.02
-                m.color = _C_WP
-            m.points = [Point(x=wp.x, y=wp.y, z=0.05) for wp in wps]
-        for i, wp in enumerate(wps):
-            active = i == mv.index
-            m, new = wp_view.get(aid * 100 + i)
-            if new:
-                pass
-            m.color = _C_WP_ACT if active else _C_WP
-            radius = 0.1 if active else 0.06
-            m.scale.x = m.scale.y = m.scale.z = radius * 2.0
-            m.pose.position.x, m.pose.position.y, m.pose.position.z = wp.x, wp.y, 0.1
-        goal = wps[mv.index]
-        r = mv.radii[mv.index] if mv.radii and mv.index < len(mv.radii) else 0.3
-        if r > 0:
-            m, new = wp_rad_view.get(aid)
-            if new:
-                m.color = _C_WP_RAD
-            m.pose.position.x, m.pose.position.y = goal.x, goal.y
-            m.pose.position.z = 0.0 + 0.02 / 2.0
-            m.scale.x = m.scale.y = r * 2.0
-            m.scale.z = 0.02
-
-
 def publish_module_markers(pub: MarkerPublisher, modules: Iterable[Perception | GlobalPlanner | LocalPlanner]) -> None:
     seen: set[int] = set()
     for mod in modules:
@@ -751,20 +449,3 @@ def publish_module_markers(pub: MarkerPublisher, modules: Iterable[Perception | 
             continue
         seen.add(mid)
         mod.publish_markers(pub)
-
-
-def vision_cone(aid: int, stamp: Time, pose: Pose2D, vision_range: float, vision_fov: float) -> Marker:
-    m = mk("vision_cone", aid, Marker.TRIANGLE_LIST, stamp)
-    m.scale.x = m.scale.y = m.scale.z = 1.0
-    m.color = _C_CONE
-    segs = 12
-    half = math.radians(min(vision_fov, 360.0) * 0.5)
-    h = pose.theta
-    ox, oy, z = pose.x, pose.y, 0.02
-    for i in range(segs):
-        a0 = h - half + 2.0 * half * i / segs
-        a1 = h - half + 2.0 * half * (i + 1) / segs
-        m.points.append(Point(x=ox, y=oy, z=z))
-        m.points.append(Point(x=ox + vision_range * math.cos(a0), y=oy + vision_range * math.sin(a0), z=z))
-        m.points.append(Point(x=ox + vision_range * math.cos(a1), y=oy + vision_range * math.sin(a1), z=z))
-    return m
