@@ -1587,7 +1587,8 @@ class AgentManager(Node):
         if self._marker_pub is not None and self._publish_markers > 0:
             pool.sync_back(agents)
             mlvl = self._publish_markers
-            self._viz_state_pub.publish(self._build_agent_viz(agents, interactions))
+            if self._viz_state_pub.get_subscription_count() > 0:
+                self._viz_state_pub.publish(self._build_agent_viz(agents, interactions))
             publish_infrastructure(
                 self._marker_pub,
                 self._spawn_scheduler._sources,
@@ -1596,7 +1597,7 @@ class AgentManager(Node):
                 self._world_knowledge._objects,
                 self._obstacles,
             )
-            if mlvl >= 2:
+            if mlvl >= 2 and self._marker_pub.watched:
                 modules = list(self._perception_cache.values())
                 modules.append(self._global_planner)
                 modules.append(self._local_planner)

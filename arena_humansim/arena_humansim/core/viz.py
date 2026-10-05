@@ -170,6 +170,10 @@ class MarkerPublisher:
         self._ns_count: dict[str, int] = {}
         self._infra_sigs: dict[str, object] = {}
 
+    @property
+    def watched(self) -> bool:
+        return self._pub.get_subscription_count() > 0
+
     def infra_unchanged(self, bucket: str, sig: object) -> bool:
         prev = self._infra_sigs.get(bucket, _MISSING)
         if prev == sig:

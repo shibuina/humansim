@@ -211,8 +211,8 @@ Re-seating moves every live agent that follows the defaults onto the current loc
 - `agent_states` (`AgentFrame`) - per-tick positions, velocities, radii, kinds, animation states and policy indices of the engine's own agents, one array per field
 - `agent_meta` (`AgentMeta`, latched) - policy table plus name and handedness per agent, sent when it changes and at every reset, stamped like the frame of the same tick
 - `agent_gestures` (`AgentGestures`, latched) - active gestures with their owner, sent when they change
-- `viz_state` (`AgentViz`) - per-tick marker inputs while `publish_markers >= 1`, drawn into `viz` by `arena_humansim_viz_node` (started by the launch file, its `output_topic`, `offset_x` and `offset_y` parameters retarget and shift the markers at runtime). One message with `level: 0` clears the markers when the level drops to 0
-- `viz`, `viz_static/<bucket>` (`MarkerArray`) - infrastructure and module markers drawn by the engine itself
+- `viz_state` (`AgentViz`) - per-tick marker inputs while `publish_markers >= 1`, drawn into `viz` by `arena_humansim_viz_node` (started by the launch file, its `output_topic`, `offset_x` and `offset_y` parameters retarget and shift the markers at runtime). One message with `level: 0` clears the markers when the level drops to 0. The engine builds the per-tick message only while the topic has a subscriber, and `arena_humansim_viz_node` subscribes only while its output topic has one (checked once per second)
+- `viz`, `viz_static/<bucket>` (`MarkerArray`) - infrastructure and module markers drawn by the engine itself. Module markers are drawn only while `viz` has a subscriber
 
 **Subscribes:**
 - `world_state` — external robot state updates

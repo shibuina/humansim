@@ -1,4 +1,5 @@
 #include <array>
+#include <chrono>
 #include <memory>
 #include <string>
 #include <vector>
@@ -35,12 +36,24 @@ public:
           }
         }
       });
-    subscription_ = create_subscription<arena_humansim_msgs::msg::AgentViz>(
-      "viz_state", rclcpp::QoS(10).reliable().durability_volatile(),
-      [this](arena_humansim_msgs::msg::AgentViz::ConstSharedPtr msg) {on_viz(*msg);});
+    watch_ = create_wall_timer(std::chrono::seconds(1), [this]() {follow_subscribers();});
   }
 
 private:
+  void follow_subscribers()
+  {
+    const bool watched = publisher_->get_subscription_count() > 0;
+    if (watched && !subscription_) {
+      subscription_ = create_subscription<arena_humansim_msgs::msg::AgentViz>(
+        "viz_state", rclcpp::QoS(10).reliable().durability_volatile(),
+        [this](arena_humansim_msgs::msg::AgentViz::ConstSharedPtr msg) {on_viz(*msg);});
+    } else if (!watched && subscription_) {
+      subscription_.reset();
+      keys_[0].clear();
+      keys_[1].clear();
+    }
+  }
+
   void on_viz(const arena_humansim_msgs::msg::AgentViz & msg)
   {
     const KeySet & previous = keys_[current_ ^ 1];
@@ -55,6 +68,7 @@ private:
   rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr publisher_;
   rclcpp::Subscription<arena_humansim_msgs::msg::AgentViz>::SharedPtr subscription_;
   rclcpp::node_interfaces::PostSetParametersCallbackHandle::SharedPtr parameters_;
+  rclcpp::TimerBase::SharedPtr watch_;
   double offset_x_ = 0.0;
   double offset_y_ = 0.0;
   std::array<KeySet, 2> keys_;
