@@ -95,9 +95,11 @@ def test_wall_repulsion(planner_name: str, agent_factory: Callable[..., BaseAgen
     a_wall = agent_factory(agent_id=1, x=0.0, y=0.5)
     goal = Pose2D(x=5.0, y=-0.5)
 
-    v_free = p_free.compute([a_free], {a_free.state.agent_id: goal}, dt=0.1)[a_free.state.agent_id]
-    v_wall = p_wall.compute([a_wall], {a_wall.state.agent_id: goal}, dt=0.1)[a_wall.state.agent_id]
+    for _ in range(30):
+        for planner, agent in ((p_free, a_free), (p_wall, a_wall)):
+            vx, vy = planner.compute([agent], {agent.state.agent_id: goal}, dt=0.1)[agent.state.agent_id]
+            agent.state.velocity = (vx, vy)
+            agent.state.pose.x += vx * 0.1
+            agent.state.pose.y += vy * 0.1
 
-    pushed_up = v_wall[1] > v_free[1] + 1e-6
-    mag_reduced = math.hypot(*v_wall) < math.hypot(*v_free) - 1e-6
-    assert pushed_up or mag_reduced, f"no wall awareness: free={v_free}, wall={v_wall}"
+    assert a_wall.state.pose.y > a_free.state.pose.y + 1e-3, f"no wall awareness: free={a_free.state.pose}, wall={a_wall.state.pose}"
