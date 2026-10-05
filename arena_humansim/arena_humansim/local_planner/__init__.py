@@ -86,6 +86,12 @@ def _load_helbing() -> type[LocalPlanner]:
     return HelbingPlanner
 
 
+def _load_johansson() -> type[LocalPlanner]:
+    from .johansson import JohanssonPlanner
+
+    return JohanssonPlanner
+
+
 def _load_socialgail() -> type[LocalPlanner]:
     from .socialgail import SocialGAILPlanner
 
@@ -127,6 +133,7 @@ _registry.register("orca")(_load_orca)
 _registry.register("straight")(_load_straight)
 _registry.register("hsfm")(_load_hsfm)
 _registry.register("helbing")(_load_helbing)
+_registry.register("johansson")(_load_johansson)
 _registry.register("socialgail")(_load_socialgail)
 _registry.register("nsp")(_load_nsp)
 _registry.register("dsrnn")(_load_dsrnn)
