@@ -24,7 +24,7 @@ Perception (`perception:`):
 
 Local planner (`local_planner_params:`):
 
-Schema is taken from the active planner's `PARAM_DEFAULTS` (`sfm`: `relaxation_time`, `repulsion_strength`, `repulsion_range`, `anisotropy`. `hsfm` adds `lateral_gain`, `lateral_damping`, `angular_gain`, `angular_damping`. Other planners take none). yaml entries override individual keys, unset ones keep the planner's default distribution. Full per-planner key table: [../../arena_humansim/local_planner/README.md](../../arena_humansim/local_planner/README.md).
+Schema is taken from the active planner's `PARAM_DEFAULTS` (`sfm`: `relaxation_time`, `repulsion_strength`, `repulsion_range`, `anisotropy`. `hsfm` adds `lateral_gain`, `lateral_damping`, `angular_gain`, `angular_damping`. the other force models declare their own keys, the rest take none). yaml entries override individual keys, unset ones keep the planner's default distribution. Full per-planner key table: [../../arena_humansim/local_planner/README.md](../../arena_humansim/local_planner/README.md).
 
 Module selection (name strings, not distributions):
 

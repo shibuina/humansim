@@ -80,6 +80,12 @@ def _load_hsfm() -> type[LocalPlanner]:
     return HSFMPlanner
 
 
+def _load_helbing() -> type[LocalPlanner]:
+    from .helbing import HelbingPlanner
+
+    return HelbingPlanner
+
+
 def _load_socialgail() -> type[LocalPlanner]:
     from .socialgail import SocialGAILPlanner
 
@@ -120,6 +126,7 @@ _registry.register("sfm")(_load_sfm)
 _registry.register("orca")(_load_orca)
 _registry.register("straight")(_load_straight)
 _registry.register("hsfm")(_load_hsfm)
+_registry.register("helbing")(_load_helbing)
 _registry.register("socialgail")(_load_socialgail)
 _registry.register("nsp")(_load_nsp)
 _registry.register("dsrnn")(_load_dsrnn)
