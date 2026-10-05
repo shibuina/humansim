@@ -6,14 +6,18 @@ import attrs
 import numpy as np
 import pytest
 
+from arena_humansim.core.agent_manager import arrival_latch_step
 from arena_humansim.core.agents.base import BaseAgent
 from arena_humansim.core.pool import AgentPool
+from arena_humansim.global_planner import GlobalPlanner
+from arena_humansim.global_planner._grid import next_waypoint
 from arena_humansim.local_planner.orca import (
     ORCAPlanner,
     _linear_program1,
     _linear_program2,
     _linear_program3,
 )
+from arena_humansim.local_planner.pedvo import PedVOPlanner
 from arena_humansim.utils.benchmark import generate_maze
 from arena_humansim.utils.types import Pose2D, Segments
 
@@ -384,3 +388,35 @@ def test_orca_wall_grid_candidates_match_single_cell_full_scan(agent_factory: Ca
     assert single_cell._grid.nx == single_cell._grid.ny == 1
 
     assert gridded.compute(agents, goals, dt=_DT) == single_cell.compute(agents, goals, dt=_DT)
+
+
+@pytest.mark.parametrize("planner_cls", [ORCAPlanner, PedVOPlanner])
+def test_agent_following_cornered_path_passes_every_subgoal(planner_cls: type[ORCAPlanner], agent_factory: Callable[..., BaseAgent]) -> None:
+    planner = planner_cls()
+    waypoints = [Pose2D(x=0.0, y=0.0), Pose2D(x=2.0, y=0.0), Pose2D(x=2.0, y=2.0), Pose2D(x=0.0, y=2.0)]
+    pool = _pool(agent_factory, [((0.0, 0.0), None, (0.0, 0.0))])
+    idx = 0
+    for _ in range(400):
+        here = Pose2D(x=float(pool.pos[0, 0]), y=float(pool.pos[0, 1]))
+        idx = GlobalPlanner.advance_along_path(here, waypoints, idx)
+        sub = next_waypoint(waypoints, idx)
+        pool.goal_pos[0] = (sub.x, sub.y)
+        pool.has_goal[0] = True
+        planner.compute_pool(pool, dt=_DT)
+        pool.pos[0] += pool.vel[0] * _DT
+        pool.prev_vel[0] = pool.vel[0]
+
+    assert idx == len(waypoints) - 1
+    assert np.hypot(pool.pos[0, 0] - 0.0, pool.pos[0, 1] - 2.0) < 0.15
+
+
+@pytest.mark.parametrize("planner_cls", [ORCAPlanner, PedVOPlanner])
+def test_latched_agent_holds_its_slot(planner_cls: type[ORCAPlanner], agent_factory: Callable[..., BaseAgent]) -> None:
+    planner = planner_cls()
+    pool = _pool(agent_factory, [((0.0, 0.0), (0.1, 0.0), (0.3, 0.0)), ((3.0, 0.0), (-3.0, 0.0), (0.0, 0.0))])
+    pool.set_terminals({int(pool.agent_ids[0]): Pose2D(x=0.1, y=0.0)})
+    arrival_latch_step(pool, r_enter=0.15, r_exit=0.30)
+    planner.compute_pool(pool, dt=_DT)
+
+    assert bool(pool.latched[0])
+    assert tuple(pool.vel[0]) == (0.0, 0.0)

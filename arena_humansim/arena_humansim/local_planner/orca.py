@@ -470,7 +470,7 @@ class ORCAPlanner(LocalPlanner):
         time_horizon: float = 5.0,
         max_neighbors: int = 10,
         neighbor_dist: float = 5.0,
-        goal_radius: float = 0.15,
+        goal_radius: float = 1e-6,
         time_horizon_obst: float = 2.0,
         wall_clearance: float = 0.05,
         wall_grid_cell: float = 1.0,
