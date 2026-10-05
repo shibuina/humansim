@@ -104,6 +104,12 @@ def _load_zanlungo() -> type[LocalPlanner]:
     return ZanlungoPlanner
 
 
+def _load_gcf() -> type[LocalPlanner]:
+    from .gcf import GCFPlanner
+
+    return GCFPlanner
+
+
 def _load_socialgail() -> type[LocalPlanner]:
     from .socialgail import SocialGAILPlanner
 
@@ -148,6 +154,7 @@ _registry.register("helbing")(_load_helbing)
 _registry.register("johansson")(_load_johansson)
 _registry.register("karamouzas")(_load_karamouzas)
 _registry.register("zanlungo")(_load_zanlungo)
+_registry.register("gcf")(_load_gcf)
 _registry.register("socialgail")(_load_socialgail)
 _registry.register("nsp")(_load_nsp)
 _registry.register("dsrnn")(_load_dsrnn)
