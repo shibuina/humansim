@@ -186,8 +186,8 @@ class GlobalPlanner(PoolAware, WallAware, Loggable, ABC):
         return idx
 
     @classmethod
-    def register(cls, name: str) -> Callable[[Callable[[], type[GlobalPlanner]]], Callable[[], type[GlobalPlanner]]]:
-        return _registry.register(name)
+    def register(cls, name: str, label: str | None = None) -> Callable[[Callable[[], type[GlobalPlanner]]], Callable[[], type[GlobalPlanner]]]:
+        return _registry.register(name, label)
 
     @classmethod
     def create(cls, name: str, *args: Any, **kwargs: Any) -> GlobalPlanner:
@@ -196,6 +196,10 @@ class GlobalPlanner(PoolAware, WallAware, Loggable, ABC):
     @classmethod
     def list_available(cls) -> list[str]:
         return _registry.list_available()
+
+    @classmethod
+    def labels(cls) -> dict[str, str]:
+        return _registry.labels()
 
 
 def _load_dijkstra() -> type[GlobalPlanner]:
@@ -216,6 +220,6 @@ def _load_navmesh() -> type[GlobalPlanner]:
     return NavMeshPlanner
 
 
-_registry.register("dijkstra")(_load_dijkstra)
-_registry.register("astar")(_load_astar)
-_registry.register("navmesh")(_load_navmesh)
+_registry.register("navmesh", "NavMesh")(_load_navmesh)
+_registry.register("astar", "A*")(_load_astar)
+_registry.register("dijkstra", "Dijkstra")(_load_dijkstra)

@@ -29,8 +29,12 @@ class Occluder(PoolAware, WallAware, Loggable, ABC):
         return _registry.list_available()
 
     @classmethod
-    def register(cls, name: str) -> Callable[[Callable[[], type[Occluder]]], Callable[[], type[Occluder]]]:
-        return _registry.register(name)
+    def labels(cls) -> dict[str, str]:
+        return _registry.labels()
+
+    @classmethod
+    def register(cls, name: str, label: str | None = None) -> Callable[[Callable[[], type[Occluder]]], Callable[[], type[Occluder]]]:
+        return _registry.register(name, label)
 
 
 def _load_bitmap() -> type[Occluder]:
@@ -45,5 +49,5 @@ def _load_noop() -> type[Occluder]:
     return NoopOccluder
 
 
-_registry.register("bitmap")(_load_bitmap)
-_registry.register("noop")(_load_noop)
+_registry.register("bitmap", "Bitmap")(_load_bitmap)
+_registry.register("noop", "No-op")(_load_noop)

@@ -45,8 +45,8 @@ class Formation(Loggable, ABC):
         return []
 
     @classmethod
-    def register(cls, name: str) -> Callable[[Callable[[], type[Formation]]], Callable[[], type[Formation]]]:
-        return _registry.register(name)
+    def register(cls, name: str, label: str | None = None) -> Callable[[Callable[[], type[Formation]]], Callable[[], type[Formation]]]:
+        return _registry.register(name, label)
 
     @classmethod
     def create(cls, name: str, *args: Any, **kwargs: Any) -> Formation:
@@ -55,6 +55,10 @@ class Formation(Loggable, ABC):
     @classmethod
     def list_available(cls) -> list[str]:
         return _registry.list_available()
+
+    @classmethod
+    def labels(cls) -> dict[str, str]:
+        return _registry.labels()
 
 
 def _load_line() -> type[Formation]:
@@ -81,10 +85,10 @@ def _load_dyad() -> type[Formation]:
     return DyadFormation
 
 
-_registry.register("line")(_load_line)
-_registry.register("cluster")(_load_cluster)
-_registry.register("f_formation")(_load_f_formation)
-_registry.register("dyad")(_load_dyad)
+_registry.register("line", "Line")(_load_line)
+_registry.register("cluster", "Cluster")(_load_cluster)
+_registry.register("f_formation", "F-formation")(_load_f_formation)
+_registry.register("dyad", "Dyad")(_load_dyad)
 
 
 __all__ = [

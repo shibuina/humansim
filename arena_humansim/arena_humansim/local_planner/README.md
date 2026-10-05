@@ -16,6 +16,7 @@ Velocity commands for the next tick, given each agent's global subgoal and neigh
 | `gcf` | `GCFPlanner` | Chraibi/Seyfried/Schadschneider 2010 generalized centrifugal force with speed-dependent ellipses, after Menge's AgtGCF (field of view, velocity and wall terms per the paper). No force from neighbors beside or behind, none while standing, and no wall force while walking parallel to a wall. Calibrated for one-way flow, jams in counterflow and crossing flow. Ellipses shape forces only, collisions stay circular. `ForcePlanner`. |
 | `pedvo` | `PedVOPlanner` | Curtis/Manocha PedVO: ORCA with density-aware preferred speed and turning bias, after Menge's PedVO. Subclasses `orca` with its own numba kernel. |
 | `straight` | `StraightToGoalPlanner` | Ignores neighbors, drives toward the subgoal at `desired_velocity`. `supports_pool=True`. For debugging and robot policies that don't want avoidance. |
+| `nsp` | `NSPPlanner` | Neural Social Physics (Yue/Manocha/Wang, ECCV 2022) with SDD-pretrained checkpoints. Requires `torch`. `supports_pool=True`. |
 | `socialgail` | `SocialGAILPlanner` | Learned crowd-sim policy from [William-island/SocialGAIL](https://github.com/William-island/SocialGAIL) (ICRA 2024, MIT). Pretrained HGNN actor; weights fetched on first use to `~/.cache/arena_humansim/socialgail/best.pt`. Requires `pip install torch torch-geometric`. `supports_pool=True`; re-infers every 8 sim ticks (0.4s decision interval, matching training). No wall handling - relies on `wall_projection`. |
 
 ## Contract
@@ -64,7 +65,7 @@ def on_pool_reset(self): ...                              # usually no-op; n=0 m
 1. Subclass `LocalPlanner` in a new file under `local_planner/`.
 2. Implement `compute`. Optionally set `supports_pool=True` and implement `compute_pool`. A force model can subclass `ForcePlanner` (`force.py`) instead and supply only `PARAM_DEFAULTS` and a numba `_kernel` writing goal, social and wall accelerations.
 3. Declare `PARAM_DEFAULTS` for any tuning knobs you want sampled per-agent; if `compute_pool` needs them per-agent in SoA, override `attach` + the four `on_pool_*` hooks.
-4. Register in `local_planner/__init__.py` via a `_load_<name>` lazy loader + `_registry.register("<name>")(_load_<name>)`.
+4. Register in `local_planner/__init__.py` via a `_load_<name>` lazy loader + `_register("<name>", _load_<name>, "<Label>", "<family>")`. The family (`force`, `geometric`, `no_avoidance`, `learned`) and the position in that list are what the evaluation tables and plots use.
 5. Drop a contract test under `tests/contracts/test_local_planner_contract.py` and an efficacy test under `tests/efficacy/test_local_planner_efficacy.py`.
 
 See the contract-test file for the invariants (velocity clipping, `set_walls` idempotency, pool/non-pool agreement) that gate every new planner.

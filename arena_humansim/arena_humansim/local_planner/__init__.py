@@ -4,6 +4,8 @@ from abc import ABC, abstractmethod
 from collections.abc import Callable, Sequence
 from typing import TYPE_CHECKING, Any, ClassVar
 
+import attrs
+
 from arena_humansim.core.agents import BaseAgent
 from arena_humansim.core.agents.types import ParamDist
 from arena_humansim.core.pool import PoolAware
@@ -15,6 +17,20 @@ if TYPE_CHECKING:
     from arena_humansim.core.viz import MarkerPublisher
 
 _registry: ModuleRegistry[LocalPlanner] = ModuleRegistry()
+
+
+@attrs.frozen
+class PlannerInfo:
+    family: str
+    robot_policy: bool = False
+
+
+_info: dict[str, PlannerInfo] = {}
+
+
+def _register(name: str, loader: Callable[[], type[LocalPlanner]], label: str, family: str, robot_policy: bool = False) -> None:
+    _registry.register(name, label)(loader)
+    _info[name] = PlannerInfo(family, robot_policy)
 
 
 class LocalPlanner(PoolAware, WallAware, Loggable, ABC):
@@ -40,8 +56,8 @@ class LocalPlanner(PoolAware, WallAware, Loggable, ABC):
         pass
 
     @classmethod
-    def register(cls, name: str) -> Callable[[Callable[[], type[LocalPlanner]]], Callable[[], type[LocalPlanner]]]:
-        return _registry.register(name)
+    def register(cls, name: str, label: str | None = None) -> Callable[[Callable[[], type[LocalPlanner]]], Callable[[], type[LocalPlanner]]]:
+        return _registry.register(name, label)
 
     @classmethod
     def create(cls, name: str, *args: Any, **kwargs: Any) -> LocalPlanner:
@@ -54,6 +70,15 @@ class LocalPlanner(PoolAware, WallAware, Loggable, ABC):
     @classmethod
     def list_available(cls) -> list[str]:
         return _registry.list_available()
+
+    @classmethod
+    def info(cls) -> dict[str, PlannerInfo]:
+        """Family and role of each built-in planner, in presentation order."""
+        return dict(_info)
+
+    @classmethod
+    def labels(cls) -> dict[str, str]:
+        return _registry.labels()
 
 
 def _load_sfm() -> type[LocalPlanner]:
@@ -152,19 +177,19 @@ def _load_cadrl() -> type[LocalPlanner]:
     return CADRLPlanner
 
 
-_registry.register("sfm")(_load_sfm)
-_registry.register("orca")(_load_orca)
-_registry.register("straight")(_load_straight)
-_registry.register("hsfm")(_load_hsfm)
-_registry.register("helbing")(_load_helbing)
-_registry.register("johansson")(_load_johansson)
-_registry.register("karamouzas")(_load_karamouzas)
-_registry.register("zanlungo")(_load_zanlungo)
-_registry.register("gcf")(_load_gcf)
-_registry.register("pedvo")(_load_pedvo)
-_registry.register("socialgail")(_load_socialgail)
-_registry.register("nsp")(_load_nsp)
-_registry.register("dsrnn")(_load_dsrnn)
-_registry.register("sarl")(_load_sarl)
-_registry.register("drlvo")(_load_drlvo)
-_registry.register("cadrl")(_load_cadrl)
+_register("sfm", _load_sfm, "SFM", "force")
+_register("hsfm", _load_hsfm, "HSFM", "force")
+_register("helbing", _load_helbing, "Helbing", "force")
+_register("johansson", _load_johansson, "Johansson", "force")
+_register("karamouzas", _load_karamouzas, "Karamouzas", "force")
+_register("zanlungo", _load_zanlungo, "Zanlungo", "force")
+_register("gcf", _load_gcf, "GCF", "force")
+_register("orca", _load_orca, "ORCA", "geometric")
+_register("pedvo", _load_pedvo, "PedVO", "geometric")
+_register("straight", _load_straight, "Straight", "no_avoidance")
+_register("nsp", _load_nsp, "NSP", "learned")
+_register("socialgail", _load_socialgail, "SocialGAIL", "learned")
+_register("cadrl", _load_cadrl, "CADRL", "learned", robot_policy=True)
+_register("sarl", _load_sarl, "SARL", "learned", robot_policy=True)
+_register("drlvo", _load_drlvo, "DRL-VO", "learned", robot_policy=True)
+_register("dsrnn", _load_dsrnn, "DS-RNN", "learned", robot_policy=True)

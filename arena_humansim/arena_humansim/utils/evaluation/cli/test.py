@@ -5,6 +5,7 @@ from pathlib import Path
 
 import pandas as pd
 
+from arena_humansim.local_planner import LocalPlanner
 from arena_humansim.utils.evaluation.analyze import run_analysis
 from arena_humansim.utils.evaluation.cli.sweep import run_sweep
 
@@ -19,7 +20,7 @@ def main() -> None:
     run_dir.mkdir(parents=True, exist_ok=True)
     print(f"Recordings: {run_dir}")
 
-    planners = ["sfm", "hsfm", "orca", "straight", "nsp", "socialgail"]
+    planners = [name for name, info in LocalPlanner.info().items() if not info.robot_policy]
     trials = [("simple_crossing", p, "", 42) for p in planners]
     run_sweep(trials=trials, sim_duration=60, output_dir=run_dir)
 
@@ -43,7 +44,7 @@ def main() -> None:
     print("=== Verdict ===")
     print("Pass criteria:")
     print("  (1) Six bags exist, all within 2x size of each other.")
-    print("  (2) All six rows in the kinematics table have non-zero jerk/curvature.")
+    print("  (2) All rows in the kinematics table have non-zero jerk/curvature.")
     print("  (3) socialgail row in particular is non-zero -- if all zero, drop socialgail from benchmark and from the abstract kicker.")
     print("  (4) headline.csv 'nav' row's ratio_K is finite (smoke run is single-scenario, so K_lo/K_hi uses row-bootstrap).")
 

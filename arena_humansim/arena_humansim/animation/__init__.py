@@ -35,8 +35,8 @@ class MotionAnimation(PoolAware, Loggable, ABC):
         pass
 
     @classmethod
-    def register(cls, name: str) -> Callable[[Callable[[], type[MotionAnimation]]], Callable[[], type[MotionAnimation]]]:
-        return _registry.register(name)
+    def register(cls, name: str, label: str | None = None) -> Callable[[Callable[[], type[MotionAnimation]]], Callable[[], type[MotionAnimation]]]:
+        return _registry.register(name, label)
 
     @classmethod
     def create(cls, name: str, *args: Any, **kwargs: Any) -> MotionAnimation:
@@ -45,6 +45,10 @@ class MotionAnimation(PoolAware, Loggable, ABC):
     @classmethod
     def list_available(cls) -> list[str]:
         return _registry.list_available()
+
+    @classmethod
+    def labels(cls) -> dict[str, str]:
+        return _registry.labels()
 
 
 def _load_noop() -> type[MotionAnimation]:
@@ -59,5 +63,5 @@ def _load_kinematic() -> type[MotionAnimation]:
     return KinematicAnimation
 
 
-_registry.register("noop")(_load_noop)
-_registry.register("kinematic")(_load_kinematic)
+_registry.register("noop", "No-op")(_load_noop)
+_registry.register("kinematic", "Kinematic")(_load_kinematic)

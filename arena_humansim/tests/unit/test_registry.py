@@ -80,3 +80,17 @@ def test_list_available_returns_all_keys() -> None:
         return _Thing
 
     assert sorted(reg.list_available()) == ["a", "b"]
+
+
+def test_labels_default_to_the_name() -> None:
+    reg: ModuleRegistry[object] = ModuleRegistry()
+
+    @reg.register("a", "Alpha")
+    def _load_a() -> type[object]:
+        return object
+
+    @reg.register("b")
+    def _load_b() -> type[object]:
+        return object
+
+    assert reg.labels() == {"a": "Alpha", "b": "b"}

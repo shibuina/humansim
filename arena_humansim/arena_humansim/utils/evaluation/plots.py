@@ -5,7 +5,7 @@
 Every figure is built from the CSVs `evaluate analyze` writes. Files written (PDF):
 
   k_per_scenario           K per scenario, sorted, with the bucket means as lines
-  pairwise_heatmap         scenario-weighted mean Hausdorff for all 15 driver pairs, per bucket
+  pairwise_heatmap         scenario-weighted mean Hausdorff for all driver pairs, per bucket
   kinematic_distributions  per-trial jerk, curvature and collisions per driver, per bucket
   noise_floor              across-driver vs across-seed Hausdorff (K_seed) per bucket
   variance_decomposition   share of variance by scenario, driver, seed and interactions
@@ -23,13 +23,18 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
+from arena_humansim.local_planner import LocalPlanner
+from arena_humansim.utils.evaluation.buckets import DRIVER_CLASS_FINE
 from arena_humansim.utils.evaluation.partitions import k_with_ci
 
-DRIVER_ORDER = ["sfm", "hsfm", "orca", "straight", "nsp", "socialgail"]
-DRIVER_LABEL = {"sfm": "SFM", "hsfm": "HSFM", "orca": "ORCA", "straight": "Straight", "nsp": "NSP", "socialgail": "SocialGAIL"}
-POLICY_ORDER = ["cadrl", "sarl", "drlvo", "dsrnn"]
-POLICY_LABEL = {"cadrl": "CADRL", "sarl": "SARL", "dsrnn": "DS-RNN", "drlvo": "DRL-VO"}
-DRIVER_COLOR = {"sfm": "#1f77b4", "hsfm": "#aec7e8", "orca": "#ff7f0e", "straight": "#7f7f7f", "nsp": "#9467bd", "socialgail": "#1b9e77"}
+DRIVER_ORDER = [name for name, info in LocalPlanner.info().items() if not info.robot_policy]
+DRIVER_LABEL = {name: LocalPlanner.labels()[name] for name in DRIVER_ORDER}
+POLICY_ORDER = [name for name, info in LocalPlanner.info().items() if info.robot_policy]
+POLICY_LABEL = {name: LocalPlanner.labels()[name] for name in POLICY_ORDER}
+_PAPER_COLOR = {"sfm": "#1f77b4", "hsfm": "#aec7e8", "orca": "#ff7f0e", "straight": "#7f7f7f", "nsp": "#9467bd", "socialgail": "#1b9e77"}
+_EXTRA_COLORS = ["#2ca02c", "#98df8a", "#17becf", "#9edae5", "#bcbd22", "#dbdb8d", "#d62728", "#ff9896", "#8c564b", "#c49c94", "#e377c2", "#f7b6d2"]
+_UNPAINTED = [name for name in DRIVER_ORDER if name not in _PAPER_COLOR]
+DRIVER_COLOR = _PAPER_COLOR | {name: _EXTRA_COLORS[i % len(_EXTRA_COLORS)] for i, name in enumerate(_UNPAINTED)}
 BUCKET_ROW_LABEL = {"nav": "Pure-nav", "bt": "BT-load", "het": "Heterogeneous"}
 # inches
 SIZE_SENSITIVITY = (10.456, 2.757)
@@ -52,6 +57,15 @@ def _plt() -> types.ModuleType:
 
 def _label_drivers(names: list[str]) -> list[str]:
     return [DRIVER_LABEL.get(n, n) for n in names]
+
+
+def _present(order: list[str], *columns: pd.Series) -> list[str]:
+    seen = set().union(*(set(c.dropna().unique()) for c in columns))
+    return [name for name in order if name in seen]
+
+
+def _family_edges(drivers: list[str]) -> list[int]:
+    return [k for k in range(1, len(drivers)) if DRIVER_CLASS_FINE[drivers[k]] != DRIVER_CLASS_FINE[drivers[k - 1]]]
 
 
 def scenario_k_table(pairwise: pd.DataFrame) -> pd.DataFrame:
@@ -91,7 +105,8 @@ def plot_k_per_scenario(pairwise: pd.DataFrame, headline: pd.DataFrame, out: Pat
 def pair_matrix(pairwise: pd.DataFrame, bucket: str | None) -> pd.DataFrame:
     sub = pairwise if bucket is None else pairwise[pairwise["bucket"] == bucket]
     m = sub.groupby(["p1", "p2", "scenario"])["hausdorff"].mean().groupby(["p1", "p2"]).mean()
-    mat = pd.DataFrame(np.nan, index=DRIVER_ORDER, columns=DRIVER_ORDER)
+    drivers = _present(DRIVER_ORDER, pairwise["p1"], pairwise["p2"])
+    mat = pd.DataFrame(np.nan, index=drivers, columns=drivers)
     for (p1, p2), v in m.items():
         if p1 in mat.index and p2 in mat.columns:
             mat.loc[p1, p2] = v
@@ -108,17 +123,18 @@ def plot_pairwise_heatmap(pairwise: pd.DataFrame, out: Path) -> dict[str, pd.Dat
         mat = pair_matrix(pairwise, b)
         mats[b] = mat
         im = ax.imshow(mat.to_numpy(dtype=float), cmap="viridis")
-        ax.set_xticks(range(6))
-        ax.set_yticks(range(6))
-        ax.set_xticklabels(_label_drivers(DRIVER_ORDER), rotation=45, ha="right")
-        ax.set_yticklabels(_label_drivers(DRIVER_ORDER))
-        for i in range(6):
-            for j in range(6):
+        drivers = list(mat.index)
+        ax.set_xticks(range(len(drivers)))
+        ax.set_yticks(range(len(drivers)))
+        ax.set_xticklabels(_label_drivers(drivers), rotation=45, ha="right")
+        ax.set_yticklabels(_label_drivers(drivers))
+        for i in range(len(drivers)):
+            for j in range(len(drivers)):
                 v = mat.iat[i, j]
                 if np.isfinite(v):
                     ax.text(j, i, f"{v:.1f}", ha="center", va="center", fontsize=6, color="w" if v < np.nanmax(mat.to_numpy()) * 0.6 else "k")
         ax.set_title(f"{BUCKET_LABEL[b]} (mean Hausdorff, m)")
-        for k in (2, 3, 4):
+        for k in _family_edges(drivers):
             ax.axhline(k - 0.5, color="w", lw=1.2)
             ax.axvline(k - 0.5, color="w", lw=1.2)
         fig.colorbar(im, ax=ax, fraction=0.046, pad=0.03)
@@ -135,12 +151,13 @@ def plot_kinematic_distributions(kin: pd.DataFrame, out: Path, het_kin: pd.DataF
     if het_kin is not None and (het_kin["bucket"] == "het").any():
         rows.append(("het", het_kin[het_kin["bucket"] == "het"]))
     metrics = [("jerk", "Jerk (m/s$^3$)", False), ("curvature", "Curvature (1/m)", False), ("collisions", "Collisions / trial", True)]
+    drivers = _present(DRIVER_ORDER, *(sub["planner"] for _, sub in rows))
     fig, axes = plt.subplots(len(rows), 3, figsize=SIZE_KINEMATIC, squeeze=False)
     for r, (b, sub) in enumerate(rows):
         for c, (metric, label, log) in enumerate(metrics):
             ax = axes[r][c]
             data = []
-            for d in DRIVER_ORDER:
+            for d in drivers:
                 v = sub.loc[sub["planner"] == d, metric].to_numpy(dtype=float)
                 v = v[np.isfinite(v)]
                 if log:
@@ -148,14 +165,14 @@ def plot_kinematic_distributions(kin: pd.DataFrame, out: Path, het_kin: pd.DataF
                 data.append(v if v.size else np.array([np.nan]))
             parts = ax.violinplot(data, showmedians=True, showextrema=True, widths=0.8)
             for i, body in enumerate(parts["bodies"]):
-                body.set_facecolor(DRIVER_COLOR[DRIVER_ORDER[i]])
+                body.set_facecolor(DRIVER_COLOR[drivers[i]])
                 body.set_edgecolor("none")
                 body.set_alpha(0.8)
             for key in ("cmedians", "cmins", "cmaxes", "cbars"):
                 parts[key].set_color("k")
                 parts[key].set_linewidth(0.7)
-            ax.set_xticks(range(1, 7))
-            ax.set_xticklabels(DRIVER_ORDER if r == len(rows) - 1 else [], rotation=45, ha="right")
+            ax.set_xticks(range(1, len(drivers) + 1))
+            ax.set_xticklabels(drivers if r == len(rows) - 1 else [], rotation=45, ha="right")
             if log:
                 lo, hi = 0, int(np.ceil(np.nanmax([np.nanmax(v) for v in data])))
                 ax.set_yticks(range(lo, hi + 1))
@@ -249,23 +266,25 @@ def plot_sensitivity_profile(cells: pd.DataFrame, out: Path) -> pd.DataFrame:
         pooled.append(row)
     pooled = pd.DataFrame(pooled)
     fs_cell, fs_tick, fs_title = 10.0, 10.5, 12.0
+    drivers = _present(DRIVER_ORDER, pooled["ped_planner"])
+    policies = _present(POLICY_ORDER, pooled["robot_policy"])
     fig, axes = plt.subplots(1, 3, figsize=SIZE_SENSITIVITY)
     for ax, (m, label, cmap, fmt) in zip(axes, metrics, strict=True):
-        mat = pooled.pivot(index="robot_policy", columns="ped_planner", values=m).reindex(index=POLICY_ORDER, columns=DRIVER_ORDER)
+        mat = pooled.pivot(index="robot_policy", columns="ped_planner", values=m).reindex(index=policies, columns=drivers)
         vmin, vmax = (0.0, 1.0) if m == "success_mean" else (float(np.nanmin(mat.to_numpy(dtype=float))), float(np.nanmax(mat.to_numpy(dtype=float))))
         im = ax.imshow(mat.to_numpy(dtype=float), cmap=cmap, aspect="auto", vmin=vmin, vmax=vmax)
-        ax.set_xticks(range(6))
-        ax.set_xticklabels(_label_drivers(DRIVER_ORDER), rotation=45, ha="right", rotation_mode="anchor", fontsize=fs_tick)
-        ax.set_yticks(range(4))
-        ax.set_yticklabels([POLICY_LABEL[p] for p in POLICY_ORDER], fontsize=fs_tick)
-        for i in range(4):
-            for j in range(6):
+        ax.set_xticks(range(len(drivers)))
+        ax.set_xticklabels(_label_drivers(drivers), rotation=45, ha="right", rotation_mode="anchor", fontsize=fs_tick)
+        ax.set_yticks(range(len(policies)))
+        ax.set_yticklabels([POLICY_LABEL[p] for p in policies], fontsize=fs_tick)
+        for i in range(len(policies)):
+            for j in range(len(drivers)):
                 v = mat.iat[i, j]
                 if np.isfinite(v):
                     r, g, b, _ = im.cmap(im.norm(v))
                     dark = 0.299 * r + 0.587 * g + 0.114 * b < 0.5
                     ax.text(j, i, format(v, fmt), ha="center", va="center", fontsize=fs_cell, color="w" if dark else "k")
-        for k in (2, 3, 4):
+        for k in _family_edges(drivers):
             ax.axvline(k - 0.5, color="w", lw=3.0)
         ax.set_title(label, fontsize=fs_title)
         fig.colorbar(im, ax=ax, fraction=0.046, pad=0.03).ax.tick_params(labelsize=fs_tick)

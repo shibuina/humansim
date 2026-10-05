@@ -17,8 +17,8 @@ class CollisionResolver(PoolAware, WallAware, Loggable, ABC):
     def resolve(self, pool: AgentPool) -> set[int]: ...
 
     @classmethod
-    def register(cls, name: str) -> Callable[[Callable[[], type[CollisionResolver]]], Callable[[], type[CollisionResolver]]]:
-        return _registry.register(name)
+    def register(cls, name: str, label: str | None = None) -> Callable[[Callable[[], type[CollisionResolver]]], Callable[[], type[CollisionResolver]]]:
+        return _registry.register(name, label)
 
     @classmethod
     def create(cls, name: str, *args: Any, **kwargs: Any) -> CollisionResolver:
@@ -27,6 +27,10 @@ class CollisionResolver(PoolAware, WallAware, Loggable, ABC):
     @classmethod
     def list_available(cls) -> list[str]:
         return _registry.list_available()
+
+    @classmethod
+    def labels(cls) -> dict[str, str]:
+        return _registry.labels()
 
 
 class NoopCollisionResolver(CollisionResolver):
@@ -44,5 +48,5 @@ def _load_wall_projection() -> type[CollisionResolver]:
     return WallProjectionResolver
 
 
-_registry.register("noop")(_load_noop)
-_registry.register("wall_projection")(_load_wall_projection)
+_registry.register("noop", "No-op")(_load_noop)
+_registry.register("wall_projection", "Wall projection")(_load_wall_projection)

@@ -13,19 +13,15 @@ from arena_humansim.utils.scenario_discovery import scenario_roots
 
 
 def _discover_robot_policies() -> list[str]:
-    """List robot policy names by walking arena_humansim/local_planner/robot/."""
-    from arena_humansim.local_planner import robot as _robot_pkg
+    from arena_humansim.local_planner import LocalPlanner
 
-    root = Path(_robot_pkg.__file__).parent
-    return sorted(p.name for p in root.iterdir() if p.is_dir() and not p.name.startswith("_"))
+    return sorted(name for name, info in LocalPlanner.info().items() if info.robot_policy)
 
 
 def _discover_ped_planners() -> list[str]:
-    """Pedestrian planners = registry minus robot/ policies."""
     from arena_humansim.local_planner import LocalPlanner
 
-    robot_set = set(_discover_robot_policies())
-    return sorted(name for name in LocalPlanner.list_available() if name not in robot_set)
+    return sorted(name for name, info in LocalPlanner.info().items() if not info.robot_policy)
 
 
 def _discover_scenarios(robots_mode: bool) -> list[str]:

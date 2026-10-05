@@ -5,9 +5,9 @@
 K per bucket for every partition below, with the same scenario-clustered 90%
 bootstrap as the headline K (which uses the fine partition):
 
-  fine            force={sfm,hsfm} geometric={orca} no_avoidance={straight} learned={nsp,socialgail}
-  binary          classical={sfm,hsfm,orca,straight} learned={nsp,socialgail}
-  binary_reactive classical={sfm,hsfm,orca} learned={nsp,socialgail} (straight excluded)
+  fine            the planner families: force, geometric, no_avoidance, learned
+  binary          classical (every family but learned) against learned
+  binary_reactive binary partition with straight excluded
   fine_reactive   fine partition with straight excluded
 """
 

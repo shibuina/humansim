@@ -19,6 +19,17 @@ from launch_ros.actions import Node
 from launch_ros.parameter_descriptions import ParameterValue
 from launch_ros.substitutions import ExecutableInPackage
 
+from arena_humansim.animation import MotionAnimation
+from arena_humansim.collision import CollisionResolver
+from arena_humansim.global_planner import GlobalPlanner
+from arena_humansim.local_planner import LocalPlanner
+from arena_humansim.occlusion import Occluder
+from arena_humansim.perception import Perception
+
+
+def _options(registry) -> str:
+    return ", ".join(registry.list_available())
+
 
 def _compute_record_dir(context, *args, plan=None, **kwargs):
     render = LaunchConfiguration("render").perform(context).lower() == "true"
@@ -160,16 +171,16 @@ def generate_launch_description():
         DeclareLaunchArgument("ticks", default_value="0", description="stop after N ticks (0 = run until Ctrl-C)"),
         DeclareLaunchArgument("time", default_value="0.0", description="stop after N seconds of sim time (ignored if ticks is set)"),
         DeclareLaunchArgument("rtf", default_value="1.0", description="real-time factor (0 = unthrottled, 1.0 = real-time)"),
-        DeclareLaunchArgument("perception", default_value="default", description="perception module"),
-        DeclareLaunchArgument("global_planner", default_value="navmesh", description="global planner module"),
-        DeclareLaunchArgument("local_planner", default_value="sfm", description="local planner module (sfm, hsfm, orca, helbing, johansson, karamouzas, zanlungo, gcf, pedvo, straight, socialgail)"),
+        DeclareLaunchArgument("perception", default_value="default", description=f"perception module ({_options(Perception)})"),
+        DeclareLaunchArgument("global_planner", default_value="navmesh", description=f"global planner module ({_options(GlobalPlanner)})"),
+        DeclareLaunchArgument("local_planner", default_value="sfm", description=f"local planner module ({_options(LocalPlanner)})"),
         DeclareLaunchArgument("force_local_planner", default_value="false", description="if true, ignore per-agent policy: in scenario YAML and force every agent (humans and robots) to use local_planner"),
         DeclareLaunchArgument("robot_policy", default_value="", description="if non-empty, override the policy: of every kind=robot agent at scenario load (humans untouched). Hero-sweep entry point."),
         DeclareLaunchArgument("robot_shutdown", default_value="", description="end the sim once every robot has latched on its final waypoint. true/false override scenario.simulation.robot_shutdown; empty = use scenario value (default false)."),
         DeclareLaunchArgument("force_waypoint_mode", default_value="", choices=["", "once", "repeat", "reverse", "random"], description="override every kind=human scenario agent's waypoint_mode at load (robots untouched). Use to keep pedestrians moving across a benchmark trial when the scenario YAML defaults them to ONCE; empty = use scenario value."),
-        DeclareLaunchArgument("animation", default_value="noop", description="animation module"),
-        DeclareLaunchArgument("collision", default_value="wall_projection", description="collision resolver module"),
-        DeclareLaunchArgument("occlusion", default_value="bitmap", description="occlusion module"),
+        DeclareLaunchArgument("animation", default_value="noop", description=f"animation module ({_options(MotionAnimation)})"),
+        DeclareLaunchArgument("collision", default_value="wall_projection", description=f"collision resolver module ({_options(CollisionResolver)})"),
+        DeclareLaunchArgument("occlusion", default_value="bitmap", description=f"occlusion module ({_options(Occluder)})"),
         DeclareLaunchArgument("seed", default_value="0", description="Random seed for the simulation RNG"),
         DeclareLaunchArgument("strict_recording", default_value="true", description="abort the trial when a second publisher appears on a contract topic"),
         DeclareLaunchArgument("trial_id", default_value="", description="opaque id written into the recording manifest (the sweep passes the trial dir name)"),

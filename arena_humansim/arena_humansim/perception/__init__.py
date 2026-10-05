@@ -40,8 +40,12 @@ class Perception(PoolAware, Loggable, ABC):
         return _registry.list_available()
 
     @classmethod
-    def register(cls, name: str) -> Callable[[Callable[[], type[Perception]]], Callable[[], type[Perception]]]:
-        return _registry.register(name)
+    def labels(cls) -> dict[str, str]:
+        return _registry.labels()
+
+    @classmethod
+    def register(cls, name: str, label: str | None = None) -> Callable[[Callable[[], type[Perception]]], Callable[[], type[Perception]]]:
+        return _registry.register(name, label)
 
 
 def _load_default() -> type[Perception]:
@@ -50,4 +54,4 @@ def _load_default() -> type[Perception]:
     return DefaultPerception
 
 
-_registry.register("default")(_load_default)
+_registry.register("default", "Default")(_load_default)

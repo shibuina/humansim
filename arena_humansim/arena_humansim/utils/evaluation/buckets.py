@@ -1,23 +1,10 @@
-DRIVER_CLASS = {
-    "sfm": "classical",
-    "hsfm": "classical",
-    "orca": "classical",
-    "straight": "classical",
-    "nsp": "learned",
-    "socialgail": "learned",
-}
+from arena_humansim.local_planner import LocalPlanner
 
-# Fine-grained taxonomy used by the within-class redundancy table (six drivers,
-# four classes per the abstract). Distinct from DRIVER_CLASS, which the
-# Sec.4.4 K_nav/K_bt headline binarizes as classical-vs-learned.
-DRIVER_CLASS_FINE = {
-    "sfm": "force",
-    "hsfm": "force",
-    "orca": "geometric",
-    "straight": "no_avoidance",
-    "nsp": "learned",
-    "socialgail": "learned",
-}
+# Fine-grained taxonomy used by the within-class redundancy table. Distinct from
+# DRIVER_CLASS, which the Sec.4.4 K_nav/K_bt headline binarizes as classical-vs-learned.
+DRIVER_CLASS_FINE = {name: info.family for name, info in LocalPlanner.info().items() if not info.robot_policy}
+
+DRIVER_CLASS = {name: "learned" if family == "learned" else "classical" for name, family in DRIVER_CLASS_FINE.items()}
 
 SCENARIO_BUCKET = {
     # nav/sparse
