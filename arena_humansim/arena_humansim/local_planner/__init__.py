@@ -110,6 +110,12 @@ def _load_gcf() -> type[LocalPlanner]:
     return GCFPlanner
 
 
+def _load_pedvo() -> type[LocalPlanner]:
+    from .pedvo import PedVOPlanner
+
+    return PedVOPlanner
+
+
 def _load_socialgail() -> type[LocalPlanner]:
     from .socialgail import SocialGAILPlanner
 
@@ -155,6 +161,7 @@ _registry.register("johansson")(_load_johansson)
 _registry.register("karamouzas")(_load_karamouzas)
 _registry.register("zanlungo")(_load_zanlungo)
 _registry.register("gcf")(_load_gcf)
+_registry.register("pedvo")(_load_pedvo)
 _registry.register("socialgail")(_load_socialgail)
 _registry.register("nsp")(_load_nsp)
 _registry.register("dsrnn")(_load_dsrnn)
