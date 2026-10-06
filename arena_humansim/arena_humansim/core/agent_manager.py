@@ -151,6 +151,8 @@ _RECONFIGURABLE_PARAMS = _TUNABLE_PARAMS | {
 
 _EXTERNAL_TIMEOUT_S = 2.0
 _EXTERNAL_ADOPT_RADIUS = 1.0
+_EXTERNAL_VELOCITY_WINDOW_S = 0.2
+_EXTERNAL_MAX_SPEED = 10.0
 
 
 @attrs.frozen
@@ -172,6 +174,8 @@ class _ExternalEntity:
     owned: bool = True
     saved_policy_idx: int | None = None
     vel: tuple[float, float] = (0.0, 0.0)
+    pose: tuple[float, float] | None = None
+    stamp: float = 0.0
 
 
 _NP_TYPES: dict[str, type[np.generic]] = {"B": np.uint8, "H": np.uint16, "h": np.int16, "i": np.int32, "I": np.uint32, "f": np.float32, "d": np.float64}
@@ -444,6 +448,7 @@ class AgentManager(Node):
         self._agent_name_to_id: dict[str, int] = {}
         self._external_entities: dict[int, _ExternalEntity] = {}
         self._external_timeout_ticks = max(1, int(round(_EXTERNAL_TIMEOUT_S / self._dt)))
+        self._external_velocity_ticks = max(1, int(round(_EXTERNAL_VELOCITY_WINDOW_S / self._dt)))
         self._walls: dict[str, tuple[tuple[float, float], tuple[float, float]]] = {}
         self._obstacles: dict[str, ObstacleData] = {}
         self._prone: set[int] = set()
@@ -2054,6 +2059,8 @@ class AgentManager(Node):
     def _consume_world_state(self) -> WorldState:
         world: WorldState = {}
         if self._latest_world_state is not None:
+            stamp = self._latest_world_state.header.stamp
+            now = stamp.sec + stamp.nanosec * 1e-9
             for agent_msg in self._latest_world_state.agents:
                 world[agent_msg.agent_id] = WorldAgentState(
                     pose=Pose2D(
@@ -2063,13 +2070,13 @@ class AgentManager(Node):
                     ),
                     velocity=(agent_msg.velocity.x, agent_msg.velocity.y),
                 )
-                self._ingest_external_agent(agent_msg)
+                self._ingest_external_agent(agent_msg, now)
             self._latest_world_state = None
         self._expire_external_entities()
         self._apply_external_velocity_pins()
         return world
 
-    def _ingest_external_agent(self, agent_msg: AgentStateMsg) -> None:
+    def _ingest_external_agent(self, agent_msg: AgentStateMsg, stamp: float) -> None:
         """Teleport the pool entity bound to this world_state id, binding or spawning it on first sight."""
         entity = self._external_entities.get(agent_msg.agent_id)
         if entity is None:
@@ -2090,8 +2097,19 @@ class AgentManager(Node):
         entity.last_seen = self._tick_count
         radius = agent_msg.radius if agent_msg.radius > 0 else 0.3
         self._teleport_agent(entity.agent_id, agent_msg.pose.x, agent_msg.pose.y, agent_msg.pose.theta, radius)
-        if entity.saved_policy_idx is not None:
-            entity.vel = (agent_msg.velocity.x, agent_msg.velocity.y)
+        fed = (agent_msg.velocity.x, agent_msg.velocity.y)
+        entity.vel = fed if entity.saved_policy_idx is not None or any(fed) else self._velocity_between(entity, agent_msg.pose, stamp)
+        entity.pose = (agent_msg.pose.x, agent_msg.pose.y)
+        entity.stamp = stamp
+
+    def _velocity_between(self, entity: _ExternalEntity, pose: Pose2DMsg, stamp: float) -> tuple[float, float]:
+        """Velocity from the entity's previous fed pose to this one, zero across a stale gap or a jump."""
+        elapsed = stamp - entity.stamp
+        if entity.pose is None or not 0.0 < elapsed <= _EXTERNAL_VELOCITY_WINDOW_S:
+            return (0.0, 0.0)
+        vx = (pose.x - entity.pose[0]) / elapsed
+        vy = (pose.y - entity.pose[1]) / elapsed
+        return (vx, vy) if math.hypot(vx, vy) <= _EXTERNAL_MAX_SPEED else (0.0, 0.0)
 
     def _match_registered_robot(self, agent_msg: AgentStateMsg) -> int | None:
         """Nearest unbound robot-kind agent within _EXTERNAL_ADOPT_RADIUS, None if no match."""
@@ -2150,11 +2168,11 @@ class AgentManager(Node):
                     self._pool.policy_idx[idx] = entity.saved_policy_idx
 
     def _apply_external_velocity_pins(self) -> None:
-        """Reassert fed velocities on bound agents after planning zeroes non-autonomous rows."""
+        """Reassert external velocities after planning, zeroing a mirror's once its feed is older than _EXTERNAL_VELOCITY_WINDOW_S."""
         pool = self._pool
         for entity in self._external_entities.values():
-            if entity.saved_policy_idx is None:
-                continue
+            if entity.saved_policy_idx is None and self._tick_count - entity.last_seen > self._external_velocity_ticks:
+                entity.vel = (0.0, 0.0)
             idx = pool._id_to_idx.get(entity.agent_id)
             if idx is None:
                 continue

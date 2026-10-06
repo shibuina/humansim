@@ -33,9 +33,11 @@ def _clean(system: RosTestSystem) -> None:
     system.manager._latest_world_state = None
 
 
-def _world_state(entries: list[tuple[int, float, float, float, float]]) -> AgentStatesMsg:
+def _world_state(entries: list[tuple[int, float, float, float, float]], stamp_ms: int = 0) -> AgentStatesMsg:
     msg = AgentStatesMsg()
     msg.header.frame_id = "map"
+    msg.header.stamp.sec = stamp_ms // 1000
+    msg.header.stamp.nanosec = stamp_ms % 1000 * 1_000_000
     for aid, x, y, theta, radius in entries:
         a = AgentStateMsg()
         a.agent_id = aid
@@ -139,6 +141,80 @@ def test_external_entity_expires(system: RosTestSystem) -> None:
     assert _EXT_ID not in manager._external_entities
     assert aid not in manager._agents
     assert manager._pool.n == 0
+
+
+def test_mirror_carries_velocity_between_stamped_poses(system: RosTestSystem) -> None:
+    manager = system.manager
+    manager._world_state_callback(_world_state([(_EXT_ID, 1.0, 0.0, 0.0, 0.4)], stamp_ms=1000))
+    system.tick_manager(1)
+    manager._world_state_callback(_world_state([(_EXT_ID, 1.05, -0.02, 0.0, 0.4)], stamp_ms=1050))
+    system.tick_manager(1)
+
+    aid = manager._external_entities[_EXT_ID].agent_id
+    pool = manager._pool
+    idx = pool._id_to_idx[aid]
+    assert pool.vel[idx, 0] == pytest.approx(1.0)
+    assert pool.vel[idx, 1] == pytest.approx(-0.4)
+    assert manager._agents[aid].state.velocity == pytest.approx((1.0, -0.4))
+
+
+def test_adopted_robot_carries_velocity_between_stamped_poses(system: RosTestSystem) -> None:
+    manager = system.manager
+    robot_aid = _spawn_robot(system, 3.0, 0.0)
+    manager._world_state_callback(_world_state([(_EXT_ID, 3.0, 0.0, 0.0, 0.5)], stamp_ms=1000))
+    system.tick_manager(1)
+    manager._world_state_callback(_world_state([(_EXT_ID, 3.0, 0.04, 0.0, 0.5)], stamp_ms=1050))
+    system.tick_manager(1)
+
+    pool = manager._pool
+    idx = pool._id_to_idx[robot_aid]
+    assert pool.vel[idx, 0] == pytest.approx(0.0)
+    assert pool.vel[idx, 1] == pytest.approx(0.8)
+
+
+def test_mirror_velocity_lapses_when_the_feed_stops(system: RosTestSystem) -> None:
+    manager = system.manager
+    manager._world_state_callback(_world_state([(_EXT_ID, 1.0, 0.0, 0.0, 0.4)], stamp_ms=1000))
+    system.tick_manager(1)
+    manager._world_state_callback(_world_state([(_EXT_ID, 1.05, 0.0, 0.0, 0.4)], stamp_ms=1050))
+    system.tick_manager(1)
+    system.tick_manager(manager._external_velocity_ticks + 1)
+
+    pool = manager._pool
+    idx = pool._id_to_idx[manager._external_entities[_EXT_ID].agent_id]
+    assert pool.vel[idx, 0] == pytest.approx(0.0)
+    assert pool.pos[idx, 0] == pytest.approx(1.05 + 0.05 * (manager._external_velocity_ticks + 1))
+
+
+@pytest.mark.parametrize(
+    ("x", "stamp_ms"),
+    [(6.0, 1050), (1.5, 1500), (1.05, 1000)],
+    ids=["jump", "stale_gap", "repeated_stamp"],
+)
+def test_mirror_carries_no_velocity_across(system: RosTestSystem, x: float, stamp_ms: int) -> None:
+    manager = system.manager
+    manager._world_state_callback(_world_state([(_EXT_ID, 1.0, 0.0, 0.0, 0.4)], stamp_ms=1000))
+    system.tick_manager(1)
+    manager._world_state_callback(_world_state([(_EXT_ID, x, 0.0, 0.0, 0.4)], stamp_ms=stamp_ms))
+    system.tick_manager(1)
+
+    pool = manager._pool
+    idx = pool._id_to_idx[manager._external_entities[_EXT_ID].agent_id]
+    assert pool.vel[idx, 0] == pytest.approx(0.0)
+    assert pool.pos[idx, 0] == pytest.approx(x)
+
+
+def test_mirror_carries_a_fed_velocity(system: RosTestSystem) -> None:
+    manager = system.manager
+    msg = _world_state([(_EXT_ID, 1.0, 0.0, 0.0, 0.4)])
+    msg.agents[0].velocity = Vector3(x=0.6, y=0.3, z=0.0)
+    manager._world_state_callback(msg)
+    system.tick_manager(1)
+
+    pool = manager._pool
+    idx = pool._id_to_idx[manager._external_entities[_EXT_ID].agent_id]
+    assert pool.vel[idx, 0] == pytest.approx(0.6)
+    assert pool.vel[idx, 1] == pytest.approx(0.3)
 
 
 def test_external_entities_excluded_from_agent_states(system: RosTestSystem) -> None:

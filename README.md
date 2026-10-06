@@ -216,7 +216,7 @@ Re-seating moves every live agent that follows the defaults onto the current loc
 - `viz`, `viz_static/<bucket>` (`MarkerArray`) - infrastructure and module markers drawn by the engine itself. Module markers are drawn only while `viz` has a subscriber
 
 **Subscribes:**
-- `world_state` — external robot state updates
+- `world_state` (`AgentStates`) - poses of externally driven robots and possessed pedestrians. A robot fed without a velocity takes the one between its last two poses, from their header stamps: zero when the stamps are more than 0.2 s apart or do not advance, or when the pose jumped faster than 10 m/s. It keeps that velocity for 0.2 s after the last message. A robot declared in the scenario moves by the feed alone while it is fed, and its own policy takes over again 2 s after the last message
 - `/clock` (subsystem mode) drives the tick: every message runs the ticks its sim time has covered since the epoch, so a held clock cannot starve the engine
 
 **Services:**
