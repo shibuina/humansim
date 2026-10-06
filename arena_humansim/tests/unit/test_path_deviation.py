@@ -116,3 +116,35 @@ def test_changed_goal_replans_agent_on_cached_path(
     assert after[1] is before[1]
     assert after[2] is not before[2]
     assert math.hypot(after[2][-1].x - 18.0, after[2][-1].y - 8.0) < 1e-6
+
+
+def test_goal_nudged_in_open_space_moves_only_the_path_end(
+    planned: NavMeshPlanner,
+    agent_factory: Callable[..., BaseAgent],
+    commands_factory: Callable[..., dict[int, Any]],
+) -> None:
+    before = planned.get_cached_paths()
+    agents = [agent_factory(agent_id=i, x=2.0, y=2.0 + 2.0 * i) for i in range(3)]
+    cmds = commands_factory(agent_ids=[0, 1], target=(18.0, 5.0)) | commands_factory(agent_ids=[2], target=(18.0, 5.0 + 0.5 * _REPLAN))
+    planned.compute(agents, cmds)
+    after = planned.get_cached_paths()
+    assert after[0] is before[0]
+    assert [(p.x, p.y) for p in after[2][:-1]] == [(p.x, p.y) for p in before[2][:-1]]
+    assert math.hypot(after[2][-1].x - 18.0, after[2][-1].y - (5.0 + 0.5 * _REPLAN)) < 1e-6
+
+
+def test_goal_nudged_behind_a_wall_replans(
+    agent_factory: Callable[..., BaseAgent],
+    commands_factory: Callable[..., dict[int, Any]],
+) -> None:
+    planner = NavMeshPlanner(replan_distance=_REPLAN, inflation_radius=_INFLATION)
+    planner.set_walls([*_open_room(), ((12.0, 4.5), (20.0, 4.5))])
+    agents = [agent_factory(agent_id=0, x=2.0, y=2.0)]
+    planner.compute(agents, commands_factory(agent_ids=[0], target=(18.0, 4.0)))
+    before = planner.get_cached_paths()[0]
+
+    planner.compute(agents, commands_factory(agent_ids=[0], target=(18.0, 4.9)))
+
+    after = planner.get_cached_paths()[0]
+    assert after[0] is not before[0]
+    assert len(after) > 2

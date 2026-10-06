@@ -8,7 +8,7 @@ import numpy as np
 import pyastar2d
 from scipy.ndimage import binary_dilation
 
-from arena_humansim.utils.types import Pose2D, Segment, Segments
+from arena_humansim.utils.types import Pose2D, Segments
 
 from . import GlobalPlanner, PlanRequest
 from ._grid import (
@@ -88,7 +88,6 @@ class AStarPlanner(GlobalPlanner):
         self._weights: np.ndarray | None = None
         self._free_labels: np.ndarray | None = None
         self._origin: Pose2D = Pose2D()
-        self._wall_segments: list[Segment] = []
 
         self._pool = ThreadPoolExecutor(max_workers=max((os.cpu_count() or 2) - 1, 1))
 

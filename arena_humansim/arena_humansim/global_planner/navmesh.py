@@ -1,12 +1,13 @@
 from __future__ import annotations
 
 import time
+from collections.abc import Sequence
 
 import numpy as np
 
 from arena_humansim.utils.mesh import TOL, Mesh
 from arena_humansim.utils.router import Router
-from arena_humansim.utils.types import Pose2D, Segment, Segments
+from arena_humansim.utils.types import Pose2D, Segments
 
 from . import GlobalPlanner, PlanRequest
 
@@ -30,7 +31,6 @@ class NavMeshPlanner(GlobalPlanner):
         self._inflation_radius = inflation_radius
         self._comfort_radius = comfort_radius
 
-        self._wall_segments: list[Segment] = []
         self._mesh: Mesh | None = None
         self._router: Router | None = None
         self._meshed: set[tuple[float, ...]] = set()
@@ -94,6 +94,20 @@ class NavMeshPlanner(GlobalPlanner):
             self._snapped[key] = None if q is None or q is p else (float(q[0]), float(q[1]))
         hit = self._snapped[key]
         return pose if hit is None else Pose2D(x=hit[0], y=hit[1], theta=pose.theta)
+
+    def snap_terminals(self, poses: Sequence[Pose2D]) -> list[Pose2D]:
+        if self._router is not None:
+            fresh = [key for key in {(p.x, p.y) for p in poses} if key not in self._snapped]
+            if fresh:
+                if len(self._snapped) + len(fresh) >= SNAP_CACHE:
+                    self._snapped.clear()
+                clear = self._router.clearance(np.array(fresh, dtype=np.float64)) >= self._router.r
+                self._snapped.update((key, None) for key, ok in zip(fresh, clear.tolist(), strict=True) if ok)
+        return [self.snap_terminal(p) for p in poses]
+
+    def _sees(self, starts: np.ndarray, ends: np.ndarray) -> np.ndarray:
+        assert self._router is not None
+        return self._router.line_of_sight(starts, ends)
 
     def _nearest_reachable(self, start: Pose2D, target: Pose2D) -> Pose2D | None:
         assert self._router is not None

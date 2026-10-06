@@ -1440,14 +1440,18 @@ class AgentManager(Node):
                     self._cached_intermediate_goals[aid] = cmd.target_pose
 
             terminals: dict[int, Pose2D] = {}
+            navigating: list[tuple[BaseAgent, Pose2D]] = []
             for aid, cmd in self._high_level_cmds.items():
                 if cmd.type != CommandType.NAVIGATE:
                     continue
                 agent = self._agents.get(aid)
                 if agent is not None:
-                    terminals[aid] = agent.global_planner.snap_terminal(cmd.target_pose)
+                    navigating.append((agent, cmd.target_pose))
                 else:
                     terminals[aid] = cmd.target_pose
+            for planner, group in _group_by(navigating, key=lambda item: item[0].global_planner):
+                snapped = planner.snap_terminals([target for _, target in group])
+                terminals.update((agent.state.agent_id, pose) for (agent, _), pose in zip(group, snapped, strict=True))
             pool.set_goals(self._cached_intermediate_goals)
             pool.set_terminals(terminals)
             self._apply_arrival_latch(pool)

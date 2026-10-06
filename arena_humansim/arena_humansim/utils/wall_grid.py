@@ -88,3 +88,84 @@ def query_walls(
                     out[j] = w
                 k += 1
     return k
+
+
+@njit(cache=True)
+def cast_one(
+    ox: float,
+    oy: float,
+    dx: float,
+    dy: float,
+    cap: float,
+    seg: np.ndarray,
+    cell_start: np.ndarray,
+    cell_walls: np.ndarray,
+    wall_cx0: np.ndarray,
+    wall_cy0: np.ndarray,
+    origin_x: float,
+    origin_y: float,
+    cell: float,
+    nx: int,
+    ny: int,
+    buf: np.ndarray,
+) -> float:
+    """Ray parameter of the first wall hit along (ox, oy) + t * (dx, dy), capped at cap, with buf holding one slot per wall."""
+    n_walls = seg.shape[0]
+    best = cap
+    half = 0.5 * cap * math.hypot(dx, dy)
+    span = 2.0 * half / cell + 2.0
+    if span * span >= n_walls:
+        k = n_walls
+        for w in range(n_walls):
+            buf[w] = w
+    else:
+        k = query_walls(cell_start, cell_walls, wall_cx0, wall_cy0, origin_x, origin_y, cell, nx, ny, ox + 0.5 * cap * dx, oy + 0.5 * cap * dy, half, buf)
+    for j in range(k):
+        w = buf[j]
+        ax = seg[w, 0]
+        ay = seg[w, 1]
+        ex = seg[w, 2] - ax
+        ey = seg[w, 3] - ay
+        wx = ax - ox
+        wy = ay - oy
+        denom = dx * ey - dy * ex
+        if abs(denom) <= 1e-12:
+            continue
+        t = (wx * ey - wy * ex) / denom
+        u = (wx * dy - wy * dx) / denom
+        if 0.0 <= t < best and 0.0 <= u <= 1.0:
+            best = t
+    return best
+
+
+@njit(cache=True)
+def _cast_kernel(
+    origins: np.ndarray,
+    dirs: np.ndarray,
+    cap: np.ndarray,
+    seg: np.ndarray,
+    cell_start: np.ndarray,
+    cell_walls: np.ndarray,
+    wall_cx0: np.ndarray,
+    wall_cy0: np.ndarray,
+    origin_x: float,
+    origin_y: float,
+    cell: float,
+    nx: int,
+    ny: int,
+    out: np.ndarray,
+) -> None:
+    buf = np.empty(seg.shape[0], dtype=np.int64)
+    for i in range(origins.shape[0]):
+        out[i] = cast_one(origins[i, 0], origins[i, 1], dirs[i, 0], dirs[i, 1], cap[i], seg, cell_start, cell_walls, wall_cx0, wall_cy0, origin_x, origin_y, cell, nx, ny, buf)
+
+
+def cast_rays(grid: WallGrid, origins: np.ndarray, dirs: np.ndarray, max_dist: float | np.ndarray) -> np.ndarray:
+    """Ray parameter of the first wall hit along each origin + t * dir, capped at max_dist."""
+    o = np.ascontiguousarray(origins, dtype=np.float64).reshape(-1, 2)
+    d = np.ascontiguousarray(dirs, dtype=np.float64).reshape(-1, 2)
+    cap = np.ascontiguousarray(np.broadcast_to(np.asarray(max_dist, dtype=np.float64), (len(o),)))
+    out = cap.copy()
+    if len(grid.segments) and len(o):
+        _cast_kernel(o, d, cap, grid.segments, grid.cell_start, grid.cell_walls, grid.wall_cx0, grid.wall_cy0, grid.origin_x, grid.origin_y, grid.cell, grid.nx, grid.ny, out)
+    return out

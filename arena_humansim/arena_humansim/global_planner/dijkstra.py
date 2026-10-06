@@ -7,7 +7,7 @@ from scipy.ndimage import binary_dilation
 from scipy.sparse import csr_matrix
 from scipy.sparse.csgraph import dijkstra
 
-from arena_humansim.utils.types import Pose2D, Segment, Segments
+from arena_humansim.utils.types import Pose2D, Segments
 
 from . import GlobalPlanner, PlanRequest
 from ._grid import (
@@ -175,7 +175,6 @@ class DijkstraPlanner(GlobalPlanner):
         self._grid_graph: csr_matrix | None = None
         self._free_labels: np.ndarray | None = None
         self._origin: Pose2D = Pose2D()
-        self._wall_segments: list[Segment] = []
 
     def configure(self, *, inflation_radius: float, resolution: float, comfort_radius: float) -> None:
         if (inflation_radius, resolution) == (self._inflation_radius, self._resolution):

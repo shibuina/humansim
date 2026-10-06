@@ -12,7 +12,8 @@ from arena_humansim.core.agents import BaseAgent
 from arena_humansim.core.pool import PoolAware
 from arena_humansim.utils import ModuleRegistry
 from arena_humansim.utils.loggable import Loggable
-from arena_humansim.utils.types import CommandType, HighLevelCommand, Pose2D, WallAware
+from arena_humansim.utils.types import CommandType, HighLevelCommand, Pose2D, Segment, WallAware
+from arena_humansim.utils.wall_grid import WallGrid, cast_rays
 
 from ._grid import min_distances_to_paths, next_waypoint
 
@@ -22,6 +23,8 @@ if TYPE_CHECKING:
 _registry: ModuleRegistry[GlobalPlanner] = ModuleRegistry()
 
 PlanRequest = tuple[int, Pose2D, Pose2D]
+
+DIRECT_RANGE = 3.0
 
 
 def simplify_path(
@@ -79,6 +82,12 @@ class GlobalPlanner(PoolAware, WallAware, Loggable, ABC):
         self._replan_distance = replan_distance
         self._path_cache: dict[int, tuple[tuple[float, float], list[Pose2D], np.ndarray, int]] = {}
         self._cached_results: dict[int, Pose2D] = {}
+        self._wall_segments: list[Segment] = []
+        self._wall_grid: tuple[list[Segment], WallGrid] | None = None
+        self._warmup()
+
+    def _warmup(self) -> None:
+        cast_rays(WallGrid([((0.0, 1.0), (1.0, 1.0))]), np.zeros((1, 2)), np.ones((1, 2)), 1.0)
 
     @abstractmethod
     def _has_map(self) -> bool: ...
@@ -99,11 +108,21 @@ class GlobalPlanner(PoolAware, WallAware, Loggable, ABC):
 
         deviations: dict[int, float] = {}
         if has_map:
-            tracked = [(agent_id, agent_positions[agent_id], entry[2]) for agent_id, target in navigate.items() if agent_id in agent_positions and (entry := self._path_cache.get(agent_id)) is not None and entry[0] == (round(target.x, 3), round(target.y, 3)) and entry[1]]
+            tracked = [(agent_id, agent_positions[agent_id], entry[2]) for agent_id, target in navigate.items() if agent_id in agent_positions and (entry := self._path_cache.get(agent_id)) is not None and math.hypot(entry[0][0] - target.x, entry[0][1] - target.y) <= self._replan_distance and entry[1]]
             if tracked:
                 positions = np.array([(pos.x, pos.y) for _, pos, _ in tracked], dtype=np.float64)
                 distances = min_distances_to_paths(positions, [points for _, _, points in tracked])
                 deviations = dict(zip([agent_id for agent_id, _, _ in tracked], distances.tolist(), strict=True))
+        unchanged = {aid for aid, d in deviations.items() if d <= self._replan_distance and self._path_cache[aid][0] == (round(navigate[aid].x, 3), round(navigate[aid].y, 3))}
+        straight = [aid for aid, target in navigate.items() if has_map and aid not in unchanged and (pos := agent_positions.get(aid)) is not None and (math.hypot(target.x - pos.x, target.y - pos.y) <= DIRECT_RANGE or (aid in deviations and self._path_cache[aid][3] >= len(self._path_cache[aid][1]) - 2))]
+        direct = set(straight)
+        moved = [aid for aid, d in deviations.items() if d <= self._replan_distance and aid not in unchanged and aid not in direct]
+        legs = straight + moved
+        ends = dict(zip(legs, self.snap_terminals([navigate[aid] for aid in legs]), strict=True))
+        starts = [agent_positions[aid] for aid in straight] + [waypoints[-2] if len(waypoints := self._path_cache[aid][1]) > 1 else agent_positions[aid] for aid in moved]
+        lines = np.array([((a.x, a.y), (ends[aid].x, ends[aid].y)) for aid, a in zip(legs, starts, strict=True)], dtype=np.float64).reshape(-1, 2, 2)
+        clear = dict(zip(legs, self._sees(lines[:, 0], lines[:, 1]).tolist() if legs else [], strict=True))
+        line_of = dict(zip(straight, lines, strict=False))
 
         for agent_id, target in navigate.items():
             agent_pos = agent_positions.get(agent_id)
@@ -112,8 +131,20 @@ class GlobalPlanner(PoolAware, WallAware, Loggable, ABC):
                 goals[agent_id] = target
                 continue
 
-            deviation = deviations.get(agent_id)
-            if deviation is not None and deviation <= self._replan_distance:
+            if clear.get(agent_id):
+                end = ends[agent_id]
+                if agent_id in direct:
+                    waypoints, idx, points = [Pose2D(x=agent_pos.x, y=agent_pos.y), end], 0, line_of[agent_id]
+                else:
+                    cached_goal, waypoints, points, idx = self._path_cache[agent_id]
+                    waypoints = [*waypoints[:-1], end]
+                    points = np.vstack([points[:-1], (end.x, end.y)])
+                idx = self.advance_along_path(agent_pos, waypoints, idx)
+                self._path_cache[agent_id] = ((round(target.x, 3), round(target.y, 3)), waypoints, points, idx)
+                goals[agent_id] = next_waypoint(waypoints, idx)
+                continue
+
+            if agent_id in unchanged:
                 cached_goal, waypoints, points, idx = self._path_cache[agent_id]
                 idx = self.advance_along_path(agent_pos, waypoints, idx)
                 self._path_cache[agent_id] = (cached_goal, waypoints, points, idx)
@@ -145,6 +176,12 @@ class GlobalPlanner(PoolAware, WallAware, Loggable, ABC):
         self._cached_results = goals
         return goals
 
+    def _sees(self, starts: np.ndarray, ends: np.ndarray) -> np.ndarray:
+        """Whether each straight leg is walkable as a whole path."""
+        if self._wall_grid is None or self._wall_grid[0] is not self._wall_segments:
+            self._wall_grid = (self._wall_segments, WallGrid(self._wall_segments))
+        return cast_rays(self._wall_grid[1], starts, ends - starts, 1.0) >= 1.0
+
     def get_cached_goals(self) -> dict[int, Pose2D]:
         return dict(self._cached_results)
 
@@ -159,6 +196,9 @@ class GlobalPlanner(PoolAware, WallAware, Loggable, ABC):
 
     def snap_terminal(self, pose: Pose2D) -> Pose2D:
         return pose
+
+    def snap_terminals(self, poses: Sequence[Pose2D]) -> list[Pose2D]:
+        return [self.snap_terminal(p) for p in poses]
 
     def _nearest_reachable(self, start: Pose2D, target: Pose2D) -> Pose2D | None:
         """Point closest to an unreachable target that start can still reach, None to walk straight at the target."""
