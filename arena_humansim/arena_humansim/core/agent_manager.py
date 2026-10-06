@@ -1513,6 +1513,7 @@ class AgentManager(Node):
                 target_pose=pose,
                 desired_velocity=agent.state.desired_velocity,
             )
+        self._apply_desired_speeds(agents, pool)
         heading_goals = {aid: pose.theta for aid, pose in formation_targets.items()}
         for aid, agent in self._agents.items():
             if aid in heading_goals:
@@ -1634,6 +1635,9 @@ class AgentManager(Node):
             r_enter=self._arrival_r_enter,
             r_exit=self._arrival_r_exit,
         )
+
+    def _apply_desired_speeds(self, agents: list[BaseAgent], pool: AgentPool) -> None:
+        pool.desired_vel[: pool.n] = [a.state.desired_velocity for a in agents]
 
     def _apply_arrival_damp(self, pool: AgentPool) -> None:
         arrival_damp_step(pool, dt=self._dt, tau_brake=self._arrival_tau_brake)
