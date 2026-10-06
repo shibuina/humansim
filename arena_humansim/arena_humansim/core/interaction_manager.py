@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+import math
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
 import attrs
+import numpy as np
+from numba import njit
 
 from arena_humansim.core.access import AcceptResult, AccessPolicy
 from arena_humansim.core.access.fifo_queue import FIFOQueue
@@ -53,6 +56,18 @@ _ENDED_OUTCOMES: frozenset[int] = frozenset(
 _UNSET: Any = object()
 
 
+@njit(cache=True)
+def _nearest_peer(xy: np.ndarray, ptr: np.ndarray) -> np.ndarray:
+    """Distance from each point to the closest other point of its group, groups delimited by ptr."""
+    out = np.full(xy.shape[0], np.inf)
+    for g in range(ptr.shape[0] - 1):
+        for i in range(ptr[g], ptr[g + 1]):
+            for j in range(ptr[g], ptr[g + 1]):
+                if i != j:
+                    out[i] = min(out[i], math.hypot(xy[i, 0] - xy[j, 0], xy[i, 1] - xy[j, 1]))
+    return out
+
+
 def _make_contract(
     interaction_type: InteractionType,
     min_participants: int | None = None,
@@ -97,8 +112,13 @@ class InteractionManager(Loggable):
         self._cohesion_multiplier = cohesion_multiplier
         self._formation_targets: dict[int, Pose2D] = {}
         self._formation_speeds: dict[int, float] = {}
+        self._formation_dt = 0.0
         self._clearance: Clearance | None = None
+        self._warmup()
         self._current_departed: set[int] = set()
+
+    def _warmup(self) -> None:
+        _nearest_peer(np.zeros((2, 2)), np.array([0, 2], dtype=np.int64))
 
     def _pose_lookup(self, agent_id: int) -> Pose2D | None:
         agent = self._agent_lookup(agent_id)
@@ -114,6 +134,7 @@ class InteractionManager(Loggable):
         self._interactions_by_type.clear()
         self._formation_targets.clear()
         self._formation_speeds.clear()
+        self._formation_dt = 0.0
         self._current_departed.clear()
 
     def set_context(
@@ -298,7 +319,9 @@ class InteractionManager(Loggable):
         high_level_commands: dict[int, HighLevelCommand],
         dt: float = 0.0,
         extra_commands: list[HighLevelCommand] | None = None,
+        formations: bool = True,
     ) -> tuple[dict[int, InteractionState], dict[int, Pose2D], set[int]]:
+        """Formations and drift checks advance only when `formations` is set, by the time since their last advance."""
         self._current_departed = set()
         self._prune_ended_interactions()
         self._tick_access(dt)
@@ -325,8 +348,11 @@ class InteractionManager(Loggable):
         for cmd in interaction_cmds:
             self._process_command(cmd)
 
-        self._tick_drift_eviction()
-        self._tick_formations(dt)
+        self._formation_dt += dt
+        if formations:
+            self._tick_drift_eviction()
+            self._tick_formations(self._formation_dt)
+            self._formation_dt = 0.0
         self._prune_dead_interactions()
         self._prune_ended_interactions()
         return self.interactions, dict(self._formation_targets), set(self._current_departed)
@@ -334,6 +360,7 @@ class InteractionManager(Loggable):
     def _tick_drift_eviction(self) -> None:
         # Same threshold as request-time proximity (x cohesion_multiplier)
         victims: list[tuple[int, int]] = []
+        loose: list[tuple[int, float, set[int], list[tuple[int, Pose2D]]]] = []
         for iid, interaction in self.interactions.items():
             if interaction.outcome != InteractionOutcome.ACTIVE:
                 continue
@@ -361,13 +388,16 @@ class InteractionManager(Loggable):
                     elif aid in latched:
                         victims.append((aid, iid))
             else:
-                poses = {aid: self._pose_lookup(aid) for aid in interaction.participants}
-                poses = {aid: p for aid, p in poses.items() if p is not None}
-                if len(poses) < 2:
-                    continue
-                for aid, pose in poses.items():
-                    nearest = min(pose_distance(pose, peer) for pid, peer in poses.items() if pid != aid)
-                    if nearest <= radius:
+                poses = [(aid, p) for aid in interaction.participants if (p := self._pose_lookup(aid)) is not None]
+                if len(poses) >= 2:
+                    loose.append((iid, radius, latched, poses))
+        if loose:
+            ptr = np.zeros(len(loose) + 1, dtype=np.int64)
+            np.cumsum([len(poses) for *_, poses in loose], out=ptr[1:])
+            nearest = iter(_nearest_peer(np.array([(p.x, p.y) for *_, poses in loose for _, p in poses], dtype=np.float64), ptr).tolist())
+            for iid, radius, latched, poses in loose:
+                for aid, _ in poses:
+                    if next(nearest) <= radius:
                         latched.add(aid)
                     elif aid in latched:
                         victims.append((aid, iid))
@@ -411,15 +441,26 @@ class InteractionManager(Loggable):
 
     def posture_of(self, agent_id: int) -> str:
         """Posture the agent's active interaction kind imposes, ``standing`` until it has arrived."""
-        for iid in self._iter_membership(agent_id, MembershipRole.PARTICIPANT):
+        for iid, role in self._agent_membership.get(agent_id, {}).items():
             interaction = self.interactions.get(iid)
-            if interaction is None or interaction.outcome != InteractionOutcome.ACTIVE:
+            if role != MembershipRole.PARTICIPANT or interaction is None or interaction.outcome != InteractionOutcome.ACTIVE:
                 continue
             formation = interaction.contract.formation
             if formation is not None and not formation.arrived(agent_id):
                 continue
             return InteractionType(interaction.type).kind.posture
         return "standing"
+
+    def postures(self) -> dict[int, str]:
+        """posture_of for every agent it does not leave standing."""
+        out: dict[int, str] = {}
+        for interaction in self.interactions.values():
+            if interaction.outcome != InteractionOutcome.ACTIVE or InteractionType(interaction.type).kind.posture == "standing":
+                continue
+            for pid in interaction.participants:
+                if pid not in out and (posture := self.posture_of(pid)) != "standing":
+                    out[pid] = posture
+        return out
 
     def parked(self) -> dict[int, Pose2D]:
         """Agents held on an explicit seat by a posture-imposing interaction, and the seat pose."""

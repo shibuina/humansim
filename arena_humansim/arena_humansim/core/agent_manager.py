@@ -1506,13 +1506,15 @@ class AgentManager(Node):
         t0 = time.perf_counter()
         self._process_interaction_scripts()
         robot_service_cmds = self._robot_service_advertiser.emit(self._agents)
+        formation_tick = (self._tick_count + 1) % self._bt_tick_interval == 0
         interactions, formation_targets, departed_agents = self._interaction_manager.update(
             self._high_level_cmds,
             dt=self._dt,
             extra_commands=robot_service_cmds,
+            formations=formation_tick,
         )
 
-        for aid, pose in formation_targets.items():
+        for aid, pose in formation_targets.items() if formation_tick else ():
             agent = self._agents.get(aid)
             if agent is None:
                 continue
@@ -2192,12 +2194,11 @@ class AgentManager(Node):
 
     def _apply_postures(self, agents: list[BaseAgent], pool: AgentPool) -> None:
         """A prone agent (lying on something, or collapsed by an authored posture) occupies a body-length disc."""
+        imposed = self._interaction_manager.postures()
         for idx, agent in enumerate(agents):
             mv = agent.movement
-            posture = mv.posture if isinstance(mv, BehaviorTreeMovement) and mv.posture else ""
-            if not posture:
-                posture = self._interaction_manager.posture_of(agent.state.agent_id)
             aid = agent.state.agent_id
+            posture = mv.posture if isinstance(mv, BehaviorTreeMovement) and mv.posture else imposed.get(aid, "standing")
             if posture == "prone":
                 self._prone.add(aid)
                 pool.agent_radius[idx] = PRONE_RADIUS

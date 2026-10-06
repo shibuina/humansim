@@ -52,7 +52,7 @@ Maintained in `_add_membership` / `_drop_membership` / `_create_interaction` / `
 
 ## Drift eviction
 
-`_tick_drift_eviction` runs every `update(dt)` immediately before `_tick_formations`. For each `ACTIVE` interaction it computes a per-participant proximity check and `stop(aid, iid, INTERRUPTED)`s any participant past the threshold:
+`_tick_drift_eviction` runs on every formation tick, immediately before `_tick_formations`. For each `ACTIVE` interaction it computes a per-participant proximity check and `stop(aid, iid, INTERRUPTED)`s any participant past the threshold:
 
 - **Object-bound** (`kind.is_object_bound`): distance from the participant to its `Formation.slot_of(...)` when the formation assigns explicit slots, otherwise to `WorldKnowledge.object_pose(interaction.object_id)`. A seat can sit further from the object origin than the threshold, and the participant is pinned to it.
 - **Otherwise** (`NONE` / `TAG` / `AGENT`): distance from the participant to its nearest other participant. Skipped while the interaction has fewer than two locatable participants.
@@ -71,11 +71,11 @@ All BT side-effects funnel through one helper:
 _update_bt_movement(aid, *, interaction_id=..., clear_command=..., last_outcome=...)
 ```
 
-Each keyword is optional (sentinel `_UNSET`). It no-ops unless a field actually changed, and it only touches agents whose movement is a `BehaviorTreeMovement`. `BehaviorTreeMovement` carries `{command, last_outcome, interaction_id}`; `SeekNode` reads `interaction_id` to know it's bound, `last_outcome` to know how the previous step ended. `_tick_formations` writes a fresh `NAVIGATE` command each tick for every arrived-but-moving participant.
+Each keyword is optional (sentinel `_UNSET`). It no-ops unless a field actually changed, and it only touches agents whose movement is a `BehaviorTreeMovement`. `BehaviorTreeMovement` carries `{command, last_outcome, interaction_id}`; `SeekNode` reads `interaction_id` to know it's bound, `last_outcome` to know how the previous step ended. `_tick_formations` writes a fresh `NAVIGATE` command for every arrived-but-moving participant on each formation tick.
 
 ## Formation ticks
 
-Every `update(dt)` advances the active formations grouped by type through `Formation.tick_all(formations, dt)`, which calls `tick` on each unless the type batches its members (`WalkFormation` senses walls and crowding for every group in one kernel call). Every formation gets the manager's `Clearance` as `formation.clearance`: free room along rays to the walls, and crowding among an observer's perceived agents. `Formation.speeds()` replaces the desired speed of its members for the tick.
+A formation tick is an `update(..., formations=True)` call. The agent manager makes one on the tick before each BT tick, the only ticks whose formation targets reach the global planner, and passes the time since the previous one as `dt`. Active formations advance grouped by type through `Formation.tick_all(formations, dt)`, which calls `tick` on each unless the type batches its members (`WalkFormation` senses walls and crowding for every group in one kernel call). Every formation gets the manager's `Clearance` as `formation.clearance`: free room along rays to the walls, and crowding among an observer's perceived agents. `Formation.speeds()` replaces the desired speed of its members until the next formation tick.
 
 ## Formation resolution
 
