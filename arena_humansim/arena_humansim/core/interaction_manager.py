@@ -369,6 +369,7 @@ class InteractionManager(Loggable):
             kind = InteractionType(interaction.type).kind
             radius = kind.interaction_radius * self._cohesion_multiplier
             latched: set[int] = interaction.state.setdefault("_drift_arrived", set())
+            latched.intersection_update(interaction.participants)
             if kind.is_object_bound:
                 object_id = interaction.object_id
                 if object_id is None or self._world_knowledge is None:
@@ -928,15 +929,15 @@ class InteractionManager(Loggable):
                 continue
             if contract.access is not None and contract.queue:
                 for pid in list(interaction.participants):
-                    self._release_participant(interaction, pid)
+                    if pid != interaction.provider:
+                        self._release_participant(interaction, pid)
                 promoted = contract.access.tick(interaction, 0.0)
                 for next_agent in promoted:
                     self._add_membership(next_agent, iid, MembershipRole.PARTICIPANT)
                     self._update_bt_movement(next_agent, interaction_id=iid)
                     self._on_formation_join(interaction, next_agent)
-                if interaction.participants:
-                    active_id = interaction.participants[0]
-                    stored = interaction.member_durations.get(active_id)
+                if promoted:
+                    stored = interaction.member_durations.get(promoted[0])
                     if stored is not None and stored > 0:
                         contract.duration = stored
                 contract.elapsed = 0.0

@@ -42,7 +42,7 @@ class Formation(Loggable, ABC):
         return True
 
     def slot_of(self, agent_id: int) -> Pose2D | None:
-        """Explicit slot the member is headed for, arrived or not, None for free-standing formations."""
+        """Slot the member is headed for, arrived or not, None for free-standing formations."""
         return None
 
     def seat_of(self, agent_id: int) -> Pose2D | None:

@@ -411,3 +411,76 @@ def test_promotion_from_the_queue_claims_the_freed_seat() -> None:
     mgr.update({}, dt=0.6)
     assert mgr.interactions[iid].participants == [2]
     assert formation.slot_of(2) == seat
+
+
+def test_generated_ring_slot_does_not_trip_drift_eviction() -> None:
+    wk = WorldKnowledge()
+    wk.add_object(WorldObject(object_id="bench", type="bench", pose=Pose2D(x=5.0, y=0.0, theta=0.0)))
+    agents = {1: _FakeAgent(state=_FakeState(agent_id=1, pose=Pose2D(x=5.3, y=0.0)))}
+    mgr = _mk_manager(agents, world=wk)
+    iid = _create(mgr, 1, InteractionType.SIT_ON, target="bench")
+    slot = mgr.interactions[iid].contract.formation.slot_of(1)
+    assert slot is not None
+    for frac in (0.0, 0.5, 1.0):
+        agents[1].state.pose = Pose2D(x=5.3 + frac * (slot.x - 5.3), y=frac * slot.y)
+        mgr.update({}, dt=0.05)
+    assert mgr.interactions[iid].outcome == InteractionOutcome.ACTIVE
+    assert mgr.interactions[iid].state["_drift_arrived"] == {1}
+
+
+def test_line_front_slot_does_not_trip_drift_eviction() -> None:
+    wk = WorldKnowledge()
+    line = FormationSpec(type="line", params={"base_step": 0.8, "front_offset": 0.8}, anchor_kind=AnchorKind.OBJECT)
+    wk.add_object(WorldObject(object_id="fountain", type="fountain", pose=Pose2D(x=4.0, y=0.0, theta=3.14159), formation=line))
+    agents = {1: _FakeAgent(state=_FakeState(agent_id=1, pose=Pose2D(x=4.2, y=0.0)))}
+    mgr = _mk_manager(agents, world=wk)
+    iid = _create(mgr, 1, InteractionType.USE, target="fountain")
+    for x in (4.2, 4.5, 4.8):
+        agents[1].state.pose = Pose2D(x=x, y=0.0)
+        mgr.update({}, dt=0.05)
+    assert mgr.interactions[iid].outcome == InteractionOutcome.ACTIVE
+    assert mgr.interactions[iid].participants == [1]
+
+
+def test_requeued_member_gets_a_fresh_drift_latch() -> None:
+    wk = WorldKnowledge()
+    line = FormationSpec(type="line", params={"base_step": 0.8, "front_offset": 0.8}, anchor_kind=AnchorKind.OBJECT)
+    wk.add_object(WorldObject(object_id="fountain", type="fountain", pose=Pose2D(x=4.0, y=0.0, theta=3.14159), formation=line))
+    front = Pose2D(x=4.8, y=0.0)
+    agents = {
+        1: _FakeAgent(state=_FakeState(agent_id=1, pose=front)),
+        2: _FakeAgent(state=_FakeState(agent_id=2, pose=Pose2D(x=5.6, y=0.0))),
+    }
+    mgr = _mk_manager(agents, world=wk)
+    iid = _create(mgr, 1, InteractionType.USE, target="fountain", duration=0.5)
+    assert mgr.accept(2, iid) is True
+    mgr.update({}, dt=0.05)
+    mgr.update({}, dt=1.0)
+    assert mgr.interactions[iid].participants == [2]
+    agents[1].state.pose = Pose2D(x=9.0, y=0.0)
+    agents[2].state.pose = front
+    assert mgr.accept(1, iid) is True
+    mgr.update({}, dt=0.05)
+    mgr.update({}, dt=1.0)
+    assert mgr.interactions[iid].participants == [1]
+    assert mgr.interactions[iid].outcome == InteractionOutcome.ACTIVE
+
+
+def test_queue_rotation_keeps_the_service_provider() -> None:
+    line = FormationSpec(type="line", params={"base_step": 0.8}, anchor_kind=AnchorKind.PROVIDER)
+    agents = {
+        1: _FakeAgent(state=_FakeState(agent_id=1, pose=Pose2D(x=0.0, y=0.0))),
+        2: _FakeAgent(state=_FakeState(agent_id=2, pose=Pose2D(x=-0.8, y=0.0))),
+        3: _FakeAgent(state=_FakeState(agent_id=3, pose=Pose2D(x=-1.6, y=0.0))),
+    }
+    mgr = _mk_manager(agents)
+    iid = _create(mgr, 1, InteractionType.SERVICE, target="desk", offer=True, duration=0.5, formation_spec=line, min_participants=2, max_participants=2, queueable=True)
+    assert mgr.accept(2, iid) is True
+    assert mgr.accept(3, iid) is True
+    mgr.update({}, dt=0.05)
+    mgr.update({}, dt=1.0)
+    interaction = mgr.interactions[iid]
+    assert interaction.participants == [1, 3]
+    assert interaction.outcome == InteractionOutcome.ACTIVE
+    assert agents[2].movement.last_outcome == InteractionOutcome.COMPLETED
+    assert agents[1].movement.last_outcome is None

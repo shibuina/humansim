@@ -111,13 +111,13 @@ class ClusterFormation(Formation):
         return pose_distance(agent.state.pose, slot.pose) < reach
 
     def slot_of(self, agent_id: int) -> Pose2D | None:
-        if self._generated:
-            return None
         slot = next((s for s in self._slots if s.agent_id == agent_id), None)
         return slot.pose if slot is not None else None
 
     def seat_of(self, agent_id: int) -> Pose2D | None:
-        return self.slot_of(agent_id) if self.arrived(agent_id) else None
+        if self._generated or not self.arrived(agent_id):
+            return None
+        return self.slot_of(agent_id)
 
     def occupied_slots(self) -> list[Pose2D]:
         if self._generated:

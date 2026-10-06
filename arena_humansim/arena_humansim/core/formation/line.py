@@ -83,32 +83,40 @@ class LineFormation(Formation):
     def on_leave(self, agent_id: int) -> None:
         self._slots = [s for s in self._slots if s.agent_id != agent_id]
 
-    def tick(self, dt: float) -> dict[int, Pose2D]:
-        del dt
+    def _slot_poses(self) -> list[Pose2D]:
         anchor_pose = self.anchor.pose()
         front_target = self._front_pose(anchor_pose)
         yaw = anchor_pose.theta
+        poses = [front_target]
+        offset_x = 0.0
+        offset_y = 0.0
+        for slot in self._slots[1:]:
+            dx, dy = self._backward_offset(self._spacing_for(slot.agent_id), yaw)
+            offset_x += dx
+            offset_y += dy
+            poses.append(Pose2D(x=front_target.x + offset_x, y=front_target.y + offset_y, theta=yaw))
+        return poses
 
+    def _anchors_front(self) -> bool:
+        return isinstance(self.anchor, AgentAnchor) and self.anchor.agent_id == self._slots[0].agent_id
+
+    def tick(self, dt: float) -> dict[int, Pose2D]:
+        del dt
         if not self._slots:
             return {}
 
-        self._slots[0].target = front_target
-        offset_x = 0.0
-        offset_y = 0.0
-        for i in range(1, len(self._slots)):
-            step = self._spacing_for(self._slots[i].agent_id)
-            dx, dy = self._backward_offset(step, yaw)
-            offset_x += dx
-            offset_y += dy
-            self._slots[i].target = Pose2D(
-                x=front_target.x + offset_x,
-                y=front_target.y + offset_y,
-                theta=yaw,
-            )
+        for slot, pose in zip(self._slots, self._slot_poses(), strict=True):
+            slot.target = pose
 
-        if isinstance(self.anchor, AgentAnchor) and self.anchor.agent_id == self._slots[0].agent_id:
+        if self._anchors_front():
             return {s.agent_id: s.target for s in self._slots[1:]}
         return {s.agent_id: s.target for s in self._slots}
+
+    def slot_of(self, agent_id: int) -> Pose2D | None:
+        idx = next((i for i, s in enumerate(self._slots) if s.agent_id == agent_id), None)
+        if idx is None or (idx == 0 and self._anchors_front()):
+            return None
+        return self._slot_poses()[idx]
 
     def arrived(self, agent_id: int) -> bool:
         slot = next((s for s in self._slots if s.agent_id == agent_id), None)

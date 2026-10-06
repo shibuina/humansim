@@ -21,28 +21,42 @@ def _run(manager_factory: Callable[..., AgentManager], name: str, seconds: float
         each_tick(mgr)
 
 
-def test_queue_use_passes_the_fountain_down_the_queue(manager_factory: Callable[..., AgentManager]) -> None:
+def test_queue_use_passes_the_fountain_down_the_queue_without_evictions(manager_factory: Callable[..., AgentManager]) -> None:
     users: set[int] = set()
+    interrupted: list[int] = []
+    last: dict[int, InteractionOutcome | None] = {}
 
     def watch(mgr: AgentManager) -> None:
         for interaction in mgr._interaction_manager.interactions.values():
             if interaction.type == InteractionType.USE and interaction.outcome == InteractionOutcome.ACTIVE:
                 users.update(interaction.participants)
+        for aid in (1, 2, 3, 4):
+            outcome = mgr._agents[aid].movement.last_outcome
+            if outcome == InteractionOutcome.INTERRUPTED and last.get(aid) != outcome:
+                interrupted.append(aid)
+            last[aid] = outcome
 
     _run(manager_factory, "queue_use", 120.0, watch)
-    assert len(users) >= 3
+    assert users == {1, 2, 3, 4}
+    assert not interrupted
 
 
-def test_static_service_serves_a_seeker(manager_factory: Callable[..., AgentManager]) -> None:
-    served: set[int] = set()
+def test_static_service_keeps_serving_seekers(manager_factory: Callable[..., AgentManager]) -> None:
+    served: list[int] = []
+    current: set[int] = set()
 
     def watch(mgr: AgentManager) -> None:
+        now: set[int] = set()
         for interaction in mgr._interaction_manager.interactions.values():
-            if interaction.type == InteractionType.SERVICE and interaction.outcome == InteractionOutcome.ACTIVE:
-                served.update(pid for pid in interaction.participants if pid != interaction.provider)
+            if interaction.type == InteractionType.SERVICE and interaction.outcome == InteractionOutcome.ACTIVE and interaction.provider in interaction.participants:
+                now.update(pid for pid in interaction.participants if pid != interaction.provider)
+        served.extend(now - current)
+        current.clear()
+        current.update(now)
 
     _run(manager_factory, "service_static", 120.0, watch)
-    assert served
+    assert set(served) == {10, 11, 12}
+    assert len(served) >= 6
 
 
 def test_mobile_escorts_carry_residents_across(manager_factory: Callable[..., AgentManager]) -> None:
