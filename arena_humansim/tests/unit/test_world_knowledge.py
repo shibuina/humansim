@@ -93,6 +93,17 @@ def test_set_queue_length_and_sum_by_type() -> None:
     assert wk.queue_length("missing") == 0
 
 
+def test_set_counts_zeroes_objects_left_out() -> None:
+    wk = _make_wk()
+    wk.add_object(_obj("a", type_="queue"))
+    wk.add_object(_obj("b", type_="queue"))
+    wk.set_counts({"a": 2, "b": 1}, {"a": 1, "b": 1})
+    wk.set_counts({"b": 3}, {"b": 2})
+    assert (wk.queue_length_for_object("a"), wk.participants_count_for_object("a")) == (0, 0)
+    assert (wk.queue_length_for_object("b"), wk.participants_count_for_object("b")) == (3, 2)
+    assert wk.nearest_object("queue", Pose2D(), exclude_full=True) is not None
+
+
 def test_clear_empties_all() -> None:
     wk = _make_wk()
     wk.add_object(_obj("a", type_="bench"))

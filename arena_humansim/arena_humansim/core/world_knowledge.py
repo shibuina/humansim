@@ -116,6 +116,11 @@ class WorldKnowledge(Loggable):
     def participants_count_for_object(self, object_id: str) -> int:
         return self._participants_counts.get(object_id, 0)
 
+    def set_counts(self, queue_lengths: dict[str, int], participants_counts: dict[str, int]) -> None:
+        """Replace every object's queue length and participant count, objects left out count zero."""
+        self._queue_lengths = queue_lengths
+        self._participants_counts = participants_counts
+
     def clear(self) -> None:
         self._objects.clear()
         self._by_type.clear()

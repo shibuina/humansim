@@ -25,9 +25,9 @@ For symmetric types (peer-to-peer, no service tag or object anchor - e.g. `GROUP
 | `kind: attention` (or `attention:` alone) | `ClearOutcome -> Attention -> Satisfy?` (bare: halt, face, drive every channel) |
 | any of the above plus `attention:` | same inner sequence, plus an `AttentionNode` rider as a third `Parallel` child |
 | only `duration:` (pure wait) | `ClearOutcome -> Hold` |
-| `autonomous: true` | bare `AutonomousNode` |
+| `autonomous: true` | `AutonomousNode` that scores `actions:` while idle and runs the winner to its end, each action compiled like the step it stands for (a symmetric interaction with `target:` walks there first) |
 
-Every compiled step is wrapped in a `Parallel(SuccessOnOne)` with a `PatienceWatchdogNode` - step-level patience spans every phase below. The parallel also stops its still-running children (watchdog, rider) when the inner sequence ends, so a rider releases its `hold: release` channels at step end while `hold: keep` channels stay on `movement.gestures` until a later node takes the slot or `SequenceStateMachine` leaves the sequence. A sequence with `attention:` is wrapped in a `SequenceRiderNode` that ticks the sequence rider next to the current step, suspending it while the step has its own `attention:` or is autonomous. `attention:` is rejected on autonomous steps and inside `actions:` - `AutonomousNode` drives actions directly, not through the step compiler.
+Every compiled step is wrapped in a `Parallel(SuccessOnOne)` with a `PatienceWatchdogNode` - step-level patience spans every phase below. The parallel also stops its still-running children (watchdog, rider) when the inner sequence ends, so a rider releases its `hold: release` channels at step end while `hold: keep` channels stay on `movement.gestures` until a later node takes the slot or `SequenceStateMachine` leaves the sequence. A sequence with `attention:` is wrapped in a `SequenceRiderNode` that ticks the sequence rider next to the current step, suspending it while the step has its own `attention:` or is autonomous. `attention:` is rejected on autonomous steps and inside `actions:`.
 
 ## Patience phases
 

@@ -9,7 +9,7 @@ from rclpy.logging import get_logger
 
 from arena_humansim.core.agents import AgentType, BaseAgent, ParamDist
 from arena_humansim.core.agents.types import ActionDef, AttentionDef, AttentionStepDef, ClipDef, GoToStepDef, SequenceDef, StepDef
-from arena_humansim.core.interaction_kinds import InteractionType, is_object_bound_name
+from arena_humansim.core.interaction_kinds import HandleKind, InteractionType, is_object_bound_name
 from arena_humansim.core.interaction_manager import InteractionManager
 from arena_humansim.core.pool import AgentPool
 from arena_humansim.core.world_knowledge import WorldKnowledge
@@ -137,6 +137,7 @@ def _expand_go_to_step(
     im: InteractionManager | None = None,
     agent_lookup: AgentLookup | None = None,
     name_lookup: NameLookup | None = None,
+    exclude_full: bool = False,
 ) -> py_trees.composites.Parallel:
     ctx = StepContext(is_bound_lookup=is_bound_lookup, im=im, target_pose=step.target_pose)
     watchdog = PatienceWatchdogNode(
@@ -155,6 +156,7 @@ def _expand_go_to_step(
                     world=world,
                     target=step.target,
                     ctx=ctx,
+                    exclude_full=exclude_full,
                 ),
                 GoToNode(name=f"{node_name}/go_to", agent=agent, ctx=ctx, world=world, pool=pool),
             ]
@@ -180,6 +182,7 @@ def _expand_interaction_step(
     im: InteractionManager | None = None,
     agent_lookup: AgentLookup | None = None,
     name_lookup: NameLookup | None = None,
+    exclude_full: bool = False,
 ) -> py_trees.composites.Parallel:
     assert step.interaction is not None, "_expand_interaction_step requires step.interaction"
     ctx = StepContext(is_bound_lookup=is_bound_lookup, im=im)
@@ -202,6 +205,7 @@ def _expand_interaction_step(
                     ctx=ctx,
                     step_interaction_radius=step.interaction_radius,
                     interaction_name=step.interaction,
+                    exclude_full=exclude_full,
                 ),
                 GoToNode(name=f"{node_name}/go_to", agent=agent, ctx=ctx, world=world),
             ]
@@ -330,6 +334,34 @@ def _expand_block_step(
     return _watched(node_name, watchdog, children, _rider(node_name, agent, step.attention, w, ctx, children))
 
 
+def _expand_action(
+    node_name: str,
+    action: ActionDef,
+    agent: BaseAgent,
+    world: WorldKnowledge,
+    rng: np.random.Generator,
+    dt: float,
+    pool: AgentPool | None = None,
+    is_bound_lookup: IsBoundLookup | None = None,
+    im: InteractionManager | None = None,
+    agent_lookup: AgentLookup | None = None,
+    name_lookup: NameLookup | None = None,
+) -> py_trees.behaviour.Behaviour:
+    """Compile an autonomous action into the subtree of the step it stands for."""
+    lookups = {"is_bound_lookup": is_bound_lookup, "im": im, "agent_lookup": agent_lookup, "name_lookup": name_lookup}
+    if action.interaction is None:
+        if action.target is None:
+            return _expand_pure_wait_step(node_name, StepDef(duration=action.duration, patience=action.patience, satisfies=action.satisfies), agent, rng, dt, world, **lookups)
+        walk = GoToStepDef(target=action.target, duration=action.duration, patience=action.patience, satisfies=action.satisfies)
+        return _expand_go_to_step(node_name, walk, agent, world, rng, dt, pool=pool, exclude_full=True, **lookups)
+    step = StepDef(interaction=action.interaction, target=action.target, duration=action.duration, patience=action.patience, satisfies=action.satisfies)
+    if action.target is None or InteractionType[action.interaction].kind.handle.kind != HandleKind.NONE:
+        return _expand_interaction_step(node_name, step, agent, world, rng, dt, exclude_full=True, **lookups)
+    walk = _expand_go_to_step(f"{node_name}/walk", GoToStepDef(target=action.target, patience=action.patience), agent, world, rng, dt, pool=pool, exclude_full=True, **lookups)
+    join = _expand_interaction_step(f"{node_name}/join", attrs.evolve(step, target=None), agent, world, rng, dt, **lookups)
+    return py_trees.composites.Sequence(name=node_name, memory=True, children=[walk, join])
+
+
 def _expand_attention_step(
     node_name: str,
     step: AttentionStepDef,
@@ -384,6 +416,7 @@ class _StepRecipe:
                 step_def=step,
                 agent=agent,
                 action_defs=dict(self.action_defs),
+                action_trees={name: _expand_action(f"{self.node_name}/{name}", action, agent, world, rng, dt, pool, is_bound_lookup, im, agent_lookup, name_lookup) for name, action in self.action_defs.items()},
                 utility_weights=dict(self.utility_weights),
                 world=world,
                 event_bus=event_bus,

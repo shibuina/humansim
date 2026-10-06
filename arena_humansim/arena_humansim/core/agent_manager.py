@@ -1549,6 +1549,8 @@ class AgentManager(Node):
             else:
                 self._high_level_cmds.pop(aid, None)
 
+        queue_lengths: dict[str, int] = {}
+        participants_counts: dict[str, int] = {}
         for interaction in interactions.values():
             if interaction.outcome != InteractionOutcome.ACTIVE:
                 for pid in (*interaction.participants, *interaction.contract.queue):
@@ -1556,14 +1558,9 @@ class AgentManager(Node):
                     if agent is not None and isinstance(agent.movement, BehaviorTreeMovement):
                         agent.movement.last_outcome = interaction.outcome
             if interaction.object_id:
-                self._world_knowledge.set_queue_length(
-                    interaction.object_id,
-                    interaction.contract.queue_length,
-                )
-                self._world_knowledge.set_participants_count(
-                    interaction.object_id,
-                    len(interaction.participants),
-                )
+                queue_lengths[interaction.object_id] = queue_lengths.get(interaction.object_id, 0) + interaction.contract.queue_length
+                participants_counts[interaction.object_id] = participants_counts.get(interaction.object_id, 0) + len(interaction.participants)
+        self._world_knowledge.set_counts(queue_lengths, participants_counts)
         self._phase_end("interactions", t0)
 
         t0 = time.perf_counter()

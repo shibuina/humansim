@@ -74,7 +74,7 @@ def _structure_action_def(val: object, _: type) -> ActionDef:
         return val
     d = dict(val)
     if "attention" in d or d.get("kind") == "attention":
-        raise ValueError("'attention' is not supported in the autonomous 'actions' library, AutonomousNode drives actions directly and only sequence steps carry attention")
+        raise ValueError("'attention' is not supported in the autonomous 'actions' library")
     if "when" in d and isinstance(d["when"], dict):
         d["when"] = {k: converter.structure(v, NeedCondition) for k, v in d["when"].items()}
     return ActionDef(**d)

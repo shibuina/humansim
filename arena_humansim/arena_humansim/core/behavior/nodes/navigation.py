@@ -48,6 +48,7 @@ class ResolveObjectNode(py_trees.behaviour.Behaviour):
         ctx: StepContext,
         step_interaction_radius: float | None = None,
         interaction_name: str | None = None,
+        exclude_full: bool = False,
     ) -> None:
         super().__init__(name)
         self._agent = agent
@@ -56,13 +57,14 @@ class ResolveObjectNode(py_trees.behaviour.Behaviour):
         self._ctx = ctx
         self._step_interaction_radius = step_interaction_radius
         self._interaction_name = interaction_name
+        self._exclude_full = exclude_full
         self._resolved: bool = False
 
     def initialise(self) -> None:
         self._resolved = False
         obj: WorldObject | None = None
         if self._target:
-            obj = self._world.resolve(self._target, self._agent.state.pose, exclude_full=False)
+            obj = self._world.resolve(self._target, self._agent.state.pose, exclude_full=self._exclude_full)
             if obj is None:
                 _bt_logger.warning(f"Agent {self._agent.state.agent_id}: step {self.name} could not resolve target={self._target!r}")
 
