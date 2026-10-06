@@ -32,6 +32,7 @@ class InteractionType(enum.IntEnum):
     SERVICE = 9
     HUG = 10
     SHAKE_HAND = 11
+    GROUP_WALK = 12
 
     @property
     def kind(self) -> InteractionKind:
@@ -273,6 +274,13 @@ def _registry() -> dict[InteractionType, InteractionKind]:
             interaction_radius=0.3,
             clip="shake_hand",
             render_pose_override=True,
+        ),
+        InteractionType.GROUP_WALK: InteractionKind(
+            label="WALK",
+            handle=_SYMMETRIC_HANDLE,
+            contract_defaults=ContractDefaults(min_participants=2, max_participants=-1, queueable=False),
+            formation_default=_fs("walk", AnchorKind.LEADER),
+            interaction_radius=3.0,
         ),
         InteractionType.BLOCK: InteractionKind(
             label="BLOCK",

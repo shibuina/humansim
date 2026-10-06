@@ -127,14 +127,14 @@ class FlowScenarioConfig:
 
 @attrs.define
 class AnchorConfig:
-    kind: str = "object"  # "object" | "agent" | "pose" | "centroid"
+    kind: str = "object"  # "object" | "agent" | "provider" | "pose" | "centroid" | "leader"
     ref: str | None = None  # object_id or agent_id (as str) for object/agent; None for pose/centroid
     pose: Pose2D | None = None  # for kind="pose"
 
 
 @attrs.define
 class FormationConfig:
-    type: str = ""  # "line" | "cluster" | "f_formation" | "dyad"
+    type: str = ""  # "line" | "cluster" | "f_formation" | "dyad" | "walk"
     anchor: AnchorConfig | None = None  # defaults to OBJECT anchor on the owning object
     params: dict[str, float] = attrs.Factory(dict)  # strategy-specific (base_step, radius, etc)
 

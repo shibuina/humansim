@@ -8,7 +8,7 @@ Every BT step that joins or creates an interaction uses `SeekNode` under the hoo
 
 | Handle   | Interactions                                   | `target:` shape              | `offer:`              |
 |----------|------------------------------------------------|------------------------------|-----------------------|
-| `NONE`   | `TALK_TO`, `GROUP_CONVERSATION`, `WAVE_AT`, `HUG`, `SHAKE_HAND` | omitted                   | not allowed           |
+| `NONE`   | `TALK_TO`, `GROUP_CONVERSATION`, `GROUP_WALK`, `WAVE_AT`, `HUG`, `SHAKE_HAND` | omitted                   | not allowed           |
 | `OBJECT` | `USE`, `SIT_ON`, `LIE_ON`, `QUEUE_USE`         | `str` (object id or type)    | not allowed           |
 | `TAG`    | `SERVICE`                                      | `str` (service tag; required for `offer: true`, optional for seekers) | provider side only |
 | `AGENT`  | `BLOCK`                                        | `int` (agent id)             | not allowed           |
@@ -52,6 +52,7 @@ Cascade (first non-null wins):
 | `SIT_ON`             | `DISTANCE_TOLERANCE` |
 | `LIE_ON`             | `DISTANCE_TOLERANCE` |
 | `GROUP_CONVERSATION` | 3.0                  |
+| `GROUP_WALK`         | 3.0                  |
 | `TALK_TO`            | 2.0                  |
 | `SERVICE`            | 3.0                  |
 | `WAVE_AT`            | 6.0                   |

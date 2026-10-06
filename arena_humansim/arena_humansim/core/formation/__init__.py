@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from collections.abc import Callable
-from typing import TYPE_CHECKING, Any
+from collections.abc import Callable, Sequence
+from typing import TYPE_CHECKING, Any, Self
 
 from arena_humansim.utils import ModuleRegistry
 from arena_humansim.utils.loggable import Loggable
@@ -13,6 +13,8 @@ from .anchor import AgentAnchor, Anchor, CentroidAnchor, ObjectAnchor, PoseAncho
 if TYPE_CHECKING:
     from arena_humansim.core.agents import BaseAgent
 
+    from .clearance import Clearance
+
 
 AgentLookup = Callable[[int], "BaseAgent | None"]
 
@@ -20,6 +22,8 @@ _registry: ModuleRegistry[Formation] = ModuleRegistry()
 
 
 class Formation(Loggable, ABC):
+    clearance: Clearance | None = None
+
     @abstractmethod
     def on_join(self, agent_id: int, *, participant: bool = True) -> None: ...
 
@@ -28,6 +32,11 @@ class Formation(Loggable, ABC):
 
     @abstractmethod
     def tick(self, dt: float) -> dict[int, Pose2D]: ...
+
+    @classmethod
+    def tick_all(cls, formations: Sequence[Self], dt: float) -> list[dict[int, Pose2D]]:
+        """Ticks formations of this type together, targets in input order."""
+        return [f.tick(dt) for f in formations]
 
     def arrived(self, agent_id: int) -> bool:
         return True
@@ -43,6 +52,10 @@ class Formation(Loggable, ABC):
     def occupied_slots(self) -> list[Pose2D]:
         """Explicit slots already assigned to a member, so a sibling formation on the same object can skip them."""
         return []
+
+    def speeds(self) -> dict[int, float]:
+        """Desired speed per member for this tick, empty where members keep their own pace."""
+        return {}
 
     @classmethod
     def register(cls, name: str, label: str | None = None) -> Callable[[Callable[[], type[Formation]]], Callable[[], type[Formation]]]:
@@ -85,10 +98,17 @@ def _load_dyad() -> type[Formation]:
     return DyadFormation
 
 
+def _load_walk() -> type[Formation]:
+    from .walk import WalkFormation
+
+    return WalkFormation
+
+
 _registry.register("line", "Line")(_load_line)
 _registry.register("cluster", "Cluster")(_load_cluster)
 _registry.register("f_formation", "F-formation")(_load_f_formation)
 _registry.register("dyad", "Dyad")(_load_dyad)
+_registry.register("walk", "Walk")(_load_walk)
 
 
 __all__ = [

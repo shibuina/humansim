@@ -77,7 +77,7 @@ Candidate actions the autonomous selector can pick from. Fields:
 | Field | Meaning |
 |---|---|
 | `when` | `{need: {below\|above: X}}` - preconditions gating the action. |
-| `interaction` | One of `TALK_TO`, `GROUP_CONVERSATION`, `SIT_ON`, `LIE_ON`, `USE`, `QUEUE_USE`, `WAVE_AT`, `BLOCK`, `SERVICE`. Omit for nav-only. |
+| `interaction` | One of `TALK_TO`, `GROUP_CONVERSATION`, `GROUP_WALK`, `SIT_ON`, `LIE_ON`, `USE`, `QUEUE_USE`, `WAVE_AT`, `BLOCK`, `SERVICE`. Omit for nav-only. |
 | `target` | Object id / object type / service tag / agent id, per the interaction's handle kind. |
 | `duration` | Distribution (seconds). |
 | `patience` | Distribution (seconds) capping the whole action (nav + execute). |
@@ -133,13 +133,13 @@ Each step is either a `StepDef` (interaction, pure-wait, cancel) or a `GoToStepD
 
 | Field | Meaning |
 |---|---|
-| `interaction` | `TALK_TO` / `GROUP_CONVERSATION` / `WAVE_AT` / `SIT_ON` / `LIE_ON` / `USE` / `QUEUE_USE` / `BLOCK` / `SERVICE`. Omit for a pure-wait step. |
+| `interaction` | `TALK_TO` / `GROUP_CONVERSATION` / `GROUP_WALK` / `WAVE_AT` / `SIT_ON` / `LIE_ON` / `USE` / `QUEUE_USE` / `BLOCK` / `SERVICE`. Omit for a pure-wait step. |
 | `target` | Interpreted per the interaction's handle kind: object id/type for `OBJECT`, service tag (str) for `SERVICE`, agent id (int) for `BLOCK`, omit for symmetric types. |
 | `offer` | SERVICE provider side. `true` makes this step create-and-wait rather than find-and-join. Required when a SERVICE interaction has no existing provider. |
 | `cancel` | `true` => emit STOP with `reason=CANCELED` on the agent's current interaction. Mutually exclusive with `interaction:`. |
 | `queueable` | Provider-side override (SERVICE with `offer: true`) - admit seekers into a FIFO queue when full. |
 | `min_participants` / `max_participants` | Provider-side overrides on the contract. Count the provider itself. |
-| `formation_spec` | Provider-side formation override: `{type, params, anchor_kind, anchor_ref, anchor_pose}`. `type` is one of `line`, `cluster`, `f_formation`, `dyad`. `anchor_kind` is one of `object`, `agent`, `provider`, `pose`, `centroid` (default `object`). `anchor_ref` names the object/agent to anchor on when `anchor_kind` needs one. `anchor_pose: {x, y, theta}` is used with `anchor_kind: pose`. |
+| `formation_spec` | Provider-side formation override: `{type, params, anchor_kind, anchor_ref, anchor_pose}`. `type` is one of `line`, `cluster`, `f_formation`, `dyad`, `walk`. `anchor_kind` is one of `object`, `agent`, `provider`, `pose`, `centroid`, `leader` (default `object`). `anchor_ref` names the object/agent to anchor on when `anchor_kind` needs one. `anchor_pose: {x, y, theta}` is used with `anchor_kind: pose`. |
 | `duration` | Distribution (seconds). With `interaction:` -> contract-level timeout (outcome `COMPLETED`). On a pure-wait step -> `HoldNode` duration (NAVIGATE-to-self). |
 | `patience` | Distribution (seconds). Covers nav + seek + wait-for-ACTIVE + hold. |
 | `satisfies` | `{need: amount}` applied on SUCCESS. |

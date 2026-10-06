@@ -26,7 +26,7 @@ Four `HandleKind`s, one strategy each, all in `interaction_kinds.py`:
 
 | Kind | Target shape | `find` scan | `populate_state` writes |
 |---|---|---|---|
-| `NONE` (symmetric: TALK_TO, GROUP_CONVERSATION, WAVE_AT) | omitted | `_scan_symmetric` - visible peer of same type | - |
+| `NONE` (symmetric: TALK_TO, GROUP_CONVERSATION, GROUP_WALK, WAVE_AT) | omitted | `_scan_symmetric` - visible peer of same type | - |
 | `TAG` (SERVICE) | `str` tag | `_scan_tag` - visible provider with matching `service_tag`; requires `offer=True` to create | `state["service_tag"]` |
 | `AGENT` (BLOCK) | `int` agent id | `_scan_agent` - interaction with matching `target_agent` | `state["target_agent"]` |
 | `OBJECT` (SIT_ON, LIE_ON, USE, QUEUE_USE) | `str` object or type | `_find_object_bound` - `_interaction_by_object_type[(object_id, type)]`, then retry via `WorldKnowledge.resolve` | returns `object_id` (stored on `InteractionState.object_id`, not `state[]`) |
@@ -73,6 +73,10 @@ _update_bt_movement(aid, *, interaction_id=..., clear_command=..., last_outcome=
 
 Each keyword is optional (sentinel `_UNSET`). It no-ops unless a field actually changed, and it only touches agents whose movement is a `BehaviorTreeMovement`. `BehaviorTreeMovement` carries `{command, last_outcome, interaction_id}`; `SeekNode` reads `interaction_id` to know it's bound, `last_outcome` to know how the previous step ended. `_tick_formations` writes a fresh `NAVIGATE` command each tick for every arrived-but-moving participant.
 
+## Formation ticks
+
+Every `update(dt)` advances the active formations grouped by type through `Formation.tick_all(formations, dt)`, which calls `tick` on each unless the type batches its members (`WalkFormation` senses walls and crowding for every group in one kernel call). Every formation gets the manager's `Clearance` as `formation.clearance`: free room along rays to the walls, and crowding among an observer's perceived agents. `Formation.speeds()` replaces the desired speed of its members for the tick.
+
 ## Formation resolution
 
 `_resolve_formation(interaction)` picks the first of:
@@ -90,6 +94,7 @@ Each keyword is optional (sentinel `_UNSET`). It no-ops unless a field actually 
 - `PROVIDER` -> `AgentAnchor` on `interaction.provider` (used by SERVICE's `f_formation`).
 - `POSE` -> `PoseAnchor` on `spec.anchor_pose`.
 - `CENTROID` -> `CentroidAnchor` over live participants.
+- `LEADER` -> `AgentAnchor` on the creator, `participants[0]` (used by GROUP_WALK's `walk`).
 
 Unresolvable anchors return `None` and the interaction runs without a formation.
 

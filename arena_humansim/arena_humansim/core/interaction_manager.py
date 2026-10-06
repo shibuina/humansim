@@ -34,6 +34,7 @@ from arena_humansim.utils.types import (
 
 if TYPE_CHECKING:
     from arena_humansim.core.agents import BaseAgent
+    from arena_humansim.core.formation.clearance import Clearance
     from arena_humansim.core.world_knowledge import WorldKnowledge
 
 
@@ -95,6 +96,8 @@ class InteractionManager(Loggable):
         self._formation_scale = formation_scale
         self._cohesion_multiplier = cohesion_multiplier
         self._formation_targets: dict[int, Pose2D] = {}
+        self._formation_speeds: dict[int, float] = {}
+        self._clearance: Clearance | None = None
         self._current_departed: set[int] = set()
 
     def _pose_lookup(self, agent_id: int) -> Pose2D | None:
@@ -110,6 +113,7 @@ class InteractionManager(Loggable):
         self._interaction_by_object_type.clear()
         self._interactions_by_type.clear()
         self._formation_targets.clear()
+        self._formation_speeds.clear()
         self._current_departed.clear()
 
     def set_context(
@@ -118,6 +122,7 @@ class InteractionManager(Loggable):
         agent_lookup: AgentLookup | None = None,
         formation_scale: float | None = None,
         visibility_lookup: VisibilityLookup | None = None,
+        clearance: Clearance | None = None,
     ) -> None:
         if world_knowledge is not None:
             self._world_knowledge = world_knowledge
@@ -127,6 +132,8 @@ class InteractionManager(Loggable):
             self._formation_scale = formation_scale
         if visibility_lookup is not None:
             self._visibility_lookup = visibility_lookup
+        if clearance is not None:
+            self._clearance = clearance
 
     def _update_bt_movement(
         self,
@@ -246,6 +253,7 @@ class InteractionManager(Loggable):
             return
         formation.on_leave(agent_id)
         self._formation_targets.pop(agent_id, None)
+        self._formation_speeds.pop(agent_id, None)
 
     def stop(
         self,
@@ -368,29 +376,35 @@ class InteractionManager(Loggable):
 
     def _tick_formations(self, dt: float) -> dict[int, Pose2D]:
         targets: dict[int, Pose2D] = {}
+        speeds: dict[int, float] = {}
+        by_type: dict[type[Formation], list[Formation]] = {}
         for interaction in self.interactions.values():
-            if interaction.outcome != InteractionOutcome.ACTIVE:
-                continue
             formation: Formation | None = interaction.contract.formation
-            if formation is None:
-                continue
-            per_formation = formation.tick(dt)
-            for aid, pose in per_formation.items():
-                targets[aid] = pose
-                agent = self._agent_lookup(aid)
-                if agent is None or not isinstance(agent.movement, BehaviorTreeMovement):
-                    continue
-                agent.movement.command = HighLevelCommand(
-                    agent_id=aid,
-                    type=CommandType.NAVIGATE,
-                    target_pose=pose,
-                    desired_velocity=agent.state.desired_velocity,
-                )
+            if interaction.outcome == InteractionOutcome.ACTIVE and formation is not None:
+                by_type.setdefault(type(formation), []).append(formation)
+        for kind, formations in by_type.items():
+            for formation, per_formation in zip(formations, kind.tick_all(formations, dt), strict=True):
+                speeds.update(formation.speeds())
+                for aid, pose in per_formation.items():
+                    targets[aid] = pose
+                    agent = self._agent_lookup(aid)
+                    if agent is None or not isinstance(agent.movement, BehaviorTreeMovement):
+                        continue
+                    agent.movement.command = HighLevelCommand(
+                        agent_id=aid,
+                        type=CommandType.NAVIGATE,
+                        target_pose=pose,
+                        desired_velocity=agent.state.desired_velocity,
+                    )
         self._formation_targets = targets
+        self._formation_speeds = speeds
         return targets
 
     def formation_target(self, agent_id: int) -> Pose2D | None:
         return self._formation_targets.get(agent_id)
+
+    def formation_speeds(self) -> dict[int, float]:
+        return self._formation_speeds
 
     def is_in_interaction(self, agent_id: int) -> bool:
         return any(role == MembershipRole.PARTICIPANT for role in self._agent_membership.get(agent_id, {}).values())
@@ -715,6 +729,8 @@ class InteractionManager(Loggable):
         if spec.formation_spec is not None:
             interaction.state["formation_spec"] = spec.formation_spec
         contract.formation = self._resolve_formation(interaction)
+        if contract.formation is not None:
+            contract.formation.clearance = self._clearance
         self._on_formation_join(interaction, creator_id)
 
         self._maybe_activate(interaction)
@@ -820,6 +836,8 @@ class InteractionManager(Loggable):
             if isinstance(provider_id, int) and provider_id >= 0:
                 return AgentAnchor(pose_lookup=self._pose_lookup, agent_id=provider_id)
             return None
+        if kind is AnchorKind.LEADER:
+            return AgentAnchor(pose_lookup=self._pose_lookup, agent_id=interaction.participants[0])
         if kind is AnchorKind.POSE:
             return PoseAnchor(fixed=spec.anchor_pose or Pose2D())
         if kind is AnchorKind.CENTROID:

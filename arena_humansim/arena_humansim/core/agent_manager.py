@@ -72,6 +72,7 @@ from arena_humansim.core.agents.types import ATTENTION_KEYWORDS, ParamDist
 from arena_humansim.core.animation_kinds import locomotion_states
 from arena_humansim.core.behavior.compiler import BehaviorTreeFactory
 from arena_humansim.core.despawn_monitor import DespawnMonitor
+from arena_humansim.core.formation.clearance import Clearance
 from arena_humansim.core.interaction_kinds import InteractionType
 from arena_humansim.core.interaction_manager import InteractionManager
 from arena_humansim.core.logger import SimulationLogger
@@ -386,11 +387,13 @@ class AgentManager(Node):
         self._collision = CollisionResolver.create(
             self._module_selections["collision"],
         )
+        self._clearance = Clearance()
         self._wall_aware: tuple[WallAware, ...] = (
             self._local_planner,
             self._global_planner,
             self._collision,
             self._occluder,
+            self._clearance,
         )
         self._pool_aware: tuple[PoolAware, ...] = (
             self._local_planner,
@@ -398,6 +401,7 @@ class AgentManager(Node):
             self._animation,
             self._collision,
             self._occluder,
+            self._clearance,
             *self._perception_cache.values(),
         )
 
@@ -416,6 +420,7 @@ class AgentManager(Node):
             world_knowledge=self._world_knowledge,
             agent_lookup=lambda aid: self._agents.get(aid),
             visibility_lookup=lambda aid: self._pool.visible_agent_ids(aid),
+            clearance=self._clearance,
         )
         self._event_bus = EventBus()
         self._event_scripts: list[EventScript] = []
@@ -1642,6 +1647,10 @@ class AgentManager(Node):
 
     def _apply_desired_speeds(self, agents: list[BaseAgent], pool: AgentPool) -> None:
         pool.desired_vel[: pool.n] = [a.state.desired_velocity for a in agents]
+        for aid, speed in self._interaction_manager.formation_speeds().items():
+            idx = pool._id_to_idx.get(aid)
+            if idx is not None:
+                pool.desired_vel[idx] = speed
 
     def _apply_arrival_damp(self, pool: AgentPool) -> None:
         arrival_damp_step(pool, dt=self._dt, tau_brake=self._arrival_tau_brake)

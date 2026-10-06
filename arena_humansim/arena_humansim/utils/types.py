@@ -63,9 +63,10 @@ class AnchorKind(enum.StrEnum):
     PROVIDER = "provider"
     POSE = "pose"
     CENTROID = "centroid"
+    LEADER = "leader"
 
 
-_VALID_FORMATION_TYPES = ("line", "cluster", "f_formation", "dyad")
+_VALID_FORMATION_TYPES = ("line", "cluster", "f_formation", "dyad", "walk")
 
 
 @attrs.define
@@ -166,6 +167,8 @@ class Formation(Protocol):
     def seat_of(self, agent_id: int) -> Pose2D | None: ...
 
     def occupied_slots(self) -> list[Pose2D]: ...
+
+    def speeds(self) -> dict[int, float]: ...
 
 
 @attrs.define

@@ -95,6 +95,7 @@ Matcher semantics (seek dispatch by handle kind, visibility gating, queueing, se
 |---|---|---|---|
 | `TALK_TO` | NONE | 2 | Face-to-face conversation |
 | `GROUP_CONVERSATION` | NONE | 2+ | Multi-agent group talk |
+| `GROUP_WALK` | NONE | 2+ | Group walking with its first participant: abreast on the leader's trail, a V trailing back from the leader in moderate crowds, single file in dense crowds or where walls leave no width, circling up when the leader stops (`circle_on_stop`). Bind members at spawn with an `interaction_scripts` entry |
 | `WAVE_AT` | NONE | 2 | Symmetric greeting |
 | `SIT_ON` / `LIE_ON` | OBJECT | 1 | Occupy furniture (FIFO queue) |
 | `USE` | OBJECT | 1 | Use a world object (FIFO queue) |
