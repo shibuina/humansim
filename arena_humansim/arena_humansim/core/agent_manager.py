@@ -898,6 +898,9 @@ class AgentManager(Node):
             except Exception as exc:
                 self._logger.warning(f"Failed to snapshot scenario: {exc}")
 
+        self._apply_scenario(scenario)
+
+    def _apply_scenario(self, scenario: ScenarioConfig) -> None:
         self._init_world_knowledge(scenario)
 
         if self._ticks_limit == 0 and scenario.simulation.max_ticks > 0:

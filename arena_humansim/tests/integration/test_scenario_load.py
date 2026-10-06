@@ -18,6 +18,7 @@ def test_scenario_builds_and_ticks(manager_factory: Callable[..., AgentManager],
     scenario = load_scenario(str(scenario_path))
     node_name = "test_scn_" + scenario_path.stem
     mgr = manager_factory(scenario, node_name=node_name)
+    assert len(mgr._walls) == len({w.name for w in scenario.walls})
     for _ in range(10):
         mgr.tick()
     assert mgr._tick_count == 10

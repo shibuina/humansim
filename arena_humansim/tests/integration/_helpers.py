@@ -43,10 +43,5 @@ def build_manager(
     finally:
         Node.__init__ = orig_init
 
-    if scenario.world_objects or scenario.agent_types or scenario.event_scripts or scenario.interaction_scripts:
-        mgr._init_world_knowledge(scenario)
-
-    if scenario.agents:
-        mgr._init_scenario_agents(scenario)
-
+    mgr._apply_scenario(scenario)
     return mgr
