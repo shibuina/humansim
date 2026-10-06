@@ -42,6 +42,8 @@ agent_types:
     extends: adult
     mode: behavior_tree
     desired_velocity: {mean: 0.9, std: 0.1, clip_low: 0.5, clip_high: 1.3}
+    perception:
+      vision_range: {mean: 8.0, std: 0.5, clip_low: 7.0, clip_high: 10.0}
     initial_sequence: hail
     sequences:
       hail:

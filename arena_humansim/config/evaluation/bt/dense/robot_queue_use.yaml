@@ -55,6 +55,6 @@ agents:
   - {agent_id: -1, kind: 1, agent_type: robot, policy: straight, spawn_pose: {x: 1.0, y: -7.0, theta: 1.5708}, goal_sequence: [{x: 1.0, y: 7.0}]}
 
 walls:
-  - {name: fountain_back, start: {x: 4.5, y: -0.4}, end: {x: 4.5, y: 0.4}}
+  - {name: fountain_back, start: {x: 3.5, y: -0.4}, end: {x: 3.5, y: 0.4}}
 
 interaction_scripts: []

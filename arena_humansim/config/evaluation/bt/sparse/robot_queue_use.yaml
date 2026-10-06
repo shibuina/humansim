@@ -52,6 +52,6 @@ agents:
     goal_sequence: [{x: 1.0, y: 6.0}]
 
 walls:
-  - {name: fountain_back, start: {x: 4.5, y: -0.4}, end: {x: 4.5, y: 0.4}}
+  - {name: fountain_back, start: {x: 3.5, y: -0.4}, end: {x: 3.5, y: 0.4}}
 
 interaction_scripts: []

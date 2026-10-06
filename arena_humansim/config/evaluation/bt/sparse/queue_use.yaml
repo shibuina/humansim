@@ -45,6 +45,6 @@ agents:
   - {agent_id: 4, agent_type: thirsty, spawn_pose: {x: -5.0, y: -1.5, theta: 0.0}}
 
 walls:
-  - {name: fountain_back, start: {x: 4.5, y: -0.4}, end: {x: 4.5, y: 0.4}}
+  - {name: fountain_back, start: {x: 3.5, y: -0.4}, end: {x: 3.5, y: 0.4}}
 
 interaction_scripts: []

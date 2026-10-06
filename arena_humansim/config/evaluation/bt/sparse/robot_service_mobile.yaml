@@ -13,6 +13,10 @@ simulation:
   execution_mode: master
   robot_shutdown: true
 
+world_objects:
+  - {object_id: stop_A, type: escort_stop, pose: {x: -7.0, y: 0.0, theta: 0.0}, capacity: 0, interaction_radius: 1.5}
+  - {object_id: stop_B, type: escort_stop, pose: {x: 7.0, y: 0.0, theta: 0.0}, capacity: 0, interaction_radius: 1.5}
+
 agent_types:
   escort:
     extends: adult
@@ -35,7 +39,7 @@ agent_types:
             patience: {mean: 60.0, std: 10.0, clip_low: 30.0, clip_high: 120.0}
           ride_to_B:
             kind: go_to
-            target_pose: {x: 7.0, y: 0.0}
+            target: stop_B
             patience: {mean: 60.0, std: 5.0, clip_low: 30.0, clip_high: 120.0}
           drop_B:
             cancel: true
@@ -50,12 +54,50 @@ agent_types:
             patience: {mean: 60.0, std: 10.0, clip_low: 30.0, clip_high: 120.0}
           ride_to_A:
             kind: go_to
-            target_pose: {x: -7.0, y: 0.0}
+            target: stop_A
             patience: {mean: 60.0, std: 5.0, clip_low: 30.0, clip_high: 120.0}
           drop_A:
             cancel: true
         then: default
         on_failure: default
+      default_from_B:
+        steps:
+          offer_B:
+            interaction: SERVICE
+            target: escort_ride_west
+            offer: true
+            min_participants: 2
+            max_participants: 2
+            queueable: false
+            formation_spec: {type: line, anchor_kind: provider, params: {base_step: 0.8}}
+            patience: {mean: 60.0, std: 10.0, clip_low: 30.0, clip_high: 120.0}
+          ride_to_A:
+            kind: go_to
+            target: stop_A
+            patience: {mean: 60.0, std: 5.0, clip_low: 30.0, clip_high: 120.0}
+          drop_A:
+            cancel: true
+          offer_A:
+            interaction: SERVICE
+            target: escort_ride_east
+            offer: true
+            min_participants: 2
+            max_participants: 2
+            queueable: false
+            formation_spec: {type: line, anchor_kind: provider, params: {base_step: 0.8}}
+            patience: {mean: 60.0, std: 10.0, clip_low: 30.0, clip_high: 120.0}
+          ride_to_B:
+            kind: go_to
+            target: stop_B
+            patience: {mean: 60.0, std: 5.0, clip_low: 30.0, clip_high: 120.0}
+          drop_B:
+            cancel: true
+        then: default_from_B
+        on_failure: default_from_B
+
+  escort_east:
+    extends: escort
+    initial_sequence: default_from_B
 
   resident_west:
     extends: adult
@@ -99,7 +141,7 @@ agent_types:
 
 agents:
   - {agent_id: 1, agent_type: escort, spawn_pose: {x: -7.0, y: 0.0, theta: 0.0}}
-  - {agent_id: 2, agent_type: escort, spawn_pose: {x:  7.0, y: 0.0, theta: 3.14159}}
+  - {agent_id: 2, agent_type: escort_east, spawn_pose: {x:  7.0, y: 0.0, theta: 3.14159}}
   - {agent_id: 10, agent_type: resident_west, spawn_pose: {x: -8.5, y: -1.5, theta: 0.0}}
   - {agent_id: 11, agent_type: resident_west, spawn_pose: {x: -7.5, y:  1.5, theta: 0.0}}
   - {agent_id: 12, agent_type: resident_west, spawn_pose: {x: -6.5, y: -0.5, theta: 0.0}}
