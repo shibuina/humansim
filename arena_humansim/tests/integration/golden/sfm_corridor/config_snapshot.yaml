@@ -1,0 +1,25 @@
+# Config snapshot - arena_humansim
+# Generated at: 2026-10-07T00:30:50+0000
+
+seed: 7
+dt: 0.05
+bt_tick_interval: 5
+modules:
+  perception: default
+  global_planner: dijkstra
+  local_planner: sfm
+  robot_policy: (none)
+  animation: noop
+  collision: wall_projection
+  occlusion: bitmap
+parameters:
+  seed: 7
+  dt: 0.05
+  bt_tick_interval: 5
+  mode: subsystem
+  perception: default
+  global_planner: dijkstra
+  local_planner: sfm
+  animation: noop
+  log_dir: /opt/arena_ws/src/Arena/humansim/arena_humansim/tests/integration/golden/sfm_corridor
+  replay_mode: ''

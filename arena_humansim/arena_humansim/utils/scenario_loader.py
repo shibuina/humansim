@@ -6,14 +6,17 @@ import cattrs
 from arena_humansim.core.agents.types import (
     ARM_CHANNELS,
     CHANNEL_SLOTS,
+    HEADING_SOURCES,
     ActionDef,
     AgentType,
     AttentionDef,
     AttentionRef,
     AttentionStepDef,
+    CadenceDist,
     ChannelDef,
     ClipDef,
     GoToStepDef,
+    LocomotionDist,
     NeedCondition,
     NeedDist,
     PerceptionDist,
@@ -442,6 +445,67 @@ def _structure_perception_dist(val: object, _: type) -> PerceptionDist:
 converter.register_structure_hook(PerceptionDist, _structure_perception_dist)
 
 
+_LOCOMOTION_KEYS = ("kinematics", "cadence", "phase_warp", "speed_profile", "lateral_profile", "footprint_length", "recovery")
+_CADENCE_KEYS = ("base", "per_speed", "min", "max")
+
+
+def _sub_block(d: dict, key: str, allowed: tuple[str, ...]) -> dict:
+    block = d.get(key)
+    if block is None:
+        return {}
+    if not isinstance(block, dict):
+        raise ValueError(f"locomotion '{key}' must be a mapping, got {type(block).__name__}")
+    unknown = set(block) - set(allowed)
+    if unknown:
+        raise ValueError(f"unknown locomotion {key} fields: {sorted(unknown)}, expected {list(allowed)}")
+    return block
+
+
+def _structure_locomotion_dist(val: object, _: type) -> LocomotionDist:
+    if isinstance(val, LocomotionDist):
+        return val
+    d = dict(val) if val is not None else {}
+    unknown = set(d) - set(_LOCOMOTION_KEYS)
+    if unknown:
+        raise ValueError(f"unknown locomotion fields: {sorted(unknown)}, expected {list(_LOCOMOTION_KEYS)}")
+    flat: dict = {}
+    if "kinematics" in d:
+        flat["kinematics"] = d["kinematics"]
+    if "footprint_length" in d:
+        flat["footprint_length"] = d["footprint_length"]
+    cadence = _sub_block(d, "cadence", _CADENCE_KEYS)
+    if cadence:
+        flat["cadence"] = CadenceDist(**cadence)
+    warp = _sub_block(d, "phase_warp", ("split",))
+    if "split" in warp:
+        flat["phase_warp_split"] = warp["split"]
+    speed = _sub_block(d, "speed_profile", ("harmonics", "amplitude_scale"))
+    if "harmonics" in speed:
+        flat["speed_profile"] = speed["harmonics"]
+    if "amplitude_scale" in speed:
+        flat["speed_amplitude_scale"] = speed["amplitude_scale"]
+    lateral = _sub_block(d, "lateral_profile", ("harmonics",))
+    if "harmonics" in lateral:
+        flat["lateral_profile"] = lateral["harmonics"]
+    recovery = _sub_block(d, "recovery", ("stall_after_s", "reverse_m"))
+    if "stall_after_s" in recovery:
+        flat["recovery_stall_after_s"] = recovery["stall_after_s"]
+    if "reverse_m" in recovery:
+        flat["recovery_reverse_m"] = recovery["reverse_m"]
+    return LocomotionDist(**flat)
+
+
+converter.register_structure_hook(LocomotionDist, _structure_locomotion_dist)
+
+
+def _structure_local_planner_param(key: str, val: object) -> object:
+    if key == "heading_source" and isinstance(val, str):
+        if val not in HEADING_SOURCES:
+            raise ValueError(f"heading_source must be one of {sorted(HEADING_SOURCES)} or a number, got {val!r}")
+        return _as_paramdist(HEADING_SOURCES[val])
+    return _as_paramdist(val)
+
+
 def _structure_agent_type(val: object, _: type) -> AgentType:
     if isinstance(val, AgentType):
         return val
@@ -449,7 +513,12 @@ def _structure_agent_type(val: object, _: type) -> AgentType:
     if "perception" in d and isinstance(d["perception"], dict):
         d["perception"] = converter.structure(d["perception"], PerceptionDist)
     if "local_planner_params" in d and isinstance(d["local_planner_params"], dict):
-        d["local_planner_params"] = {k: _as_paramdist(v) for k, v in d["local_planner_params"].items()}
+        d["local_planner_params"] = {k: _structure_local_planner_param(k, v) for k, v in d["local_planner_params"].items()}
+    if "locomotion" in d:
+        d["locomotion"] = converter.structure(d["locomotion"], LocomotionDist)
+        d["locomotion_active"] = True
+    if "assets" in d and isinstance(d["assets"], list):
+        d["assets"] = tuple(d["assets"])
     if "needs" in d and isinstance(d["needs"], dict):
         d["needs"] = {k: converter.structure(v, NeedDist) for k, v in d["needs"].items()}
     if "actions" in d and isinstance(d["actions"], dict):

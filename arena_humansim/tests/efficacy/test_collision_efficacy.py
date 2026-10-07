@@ -65,3 +65,17 @@ def test_noop_resolver_preserves_everything(resolver_name: str, resolver: Collis
     assert np.array_equal(pool.pos, pos_before)
     assert np.array_equal(pool.vel, vel_before)
     assert np.array_equal(pool.theta, theta_before)
+
+
+def test_capsule_end_non_penetration(resolver_name: str, resolver: CollisionResolver, pool_with_agents: Callable[..., AgentPool]) -> None:
+    if not _is_wall_aware(resolver):
+        pytest.skip(f"{resolver_name} is not WallAware")
+    pool = pool_with_agents(n=1)
+    pool.pos[0] = (-0.4, 0.0)
+    pool.theta[0] = 0.0
+    pool.agent_radius[0] = 0.25
+    pool.axial_offset[0] = 0.3
+    resolver.set_walls([((0.0, -1.0), (0.0, 1.0))])
+    resolver.resolve(pool)
+    front_x = float(pool.pos[0, 0]) + 0.3
+    assert front_x < -0.25 or front_x > 0.25, f"capsule end still penetrating wall: front_x={front_x}"

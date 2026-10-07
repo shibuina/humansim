@@ -1,0 +1,38 @@
+# Subject meeting a non-yielding robot that drives the centerline of a 2.0m corridor.
+
+name: wheelchair_corridor_head_on_robot
+description: >-
+  2.0m wide, 14m long corridor. A robot on the straight policy drives
+  east-to-west on the centerline and does not yield. The subject drives
+  west-to-east, starting 0.3m off the centerline toward a goal on it.
+
+simulation:
+  seed: 1
+  dt: 0.05
+  bt_tick_interval: 5
+  max_ticks: 900
+
+modules:
+  global_planner: navmesh
+
+agents:
+  - agent_id: 1000
+    agent_type: wheelchair_manual
+    desired_velocity: 0.0
+    agent_radius: 0.0
+    spawn_pose: {x: -6.0, y: 0.3, theta: 0.0}
+    goal_sequence: [{x: 6.0, y: 0.0}]
+  - agent_id: 1001
+    kind: 1
+    policy: straight
+    agent_type: robot
+    desired_velocity: 1.1
+    agent_radius: 0.3
+    spawn_pose: {x: 6.0, y: 0.0, theta: 3.14159}
+    goal_sequence: [{x: -6.0, y: 0.0}]
+
+walls:
+  - {name: north, start: {x: -7.0, y:  1.0}, end: {x: 7.0, y:  1.0}}
+  - {name: south, start: {x: -7.0, y: -1.0}, end: {x: 7.0, y: -1.0}}
+
+interaction_scripts: []

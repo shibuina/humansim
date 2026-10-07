@@ -34,6 +34,14 @@ Walls second. For each agent within `radius + margin` of a wall segment:
 
 Three relaxation passes are run to settle corner cases where resolving wall A drives the agent into wall B. After that, residual overlap is accepted.
 
+## Capsule footprints
+
+A row with `pool.axial_offset > 0` is a capsule: two disks of `agent_radius` centered at `pos +- axial_offset * (cos theta, sin theta)`, `theta` being `pool.theta`. The core agent fills the offset as `max(0, footprint_length / 2 - agent_radius)`, so a disk agent keeps offset 0 and runs the unchanged disk arithmetic.
+
+- Agent contact: each pair is tested on its closest disk-center pair (one center per disk agent, two per capsule). Penetration, push and the velocity response are computed from those two centers and applied to the agents' centers. The kd-tree pair radius grows by twice the largest offset in the pool so capsule ends are not missed.
+- Walls: both disk centers run the contact test. The position corrections of both ends are summed onto the center and the velocity is projected onto every contacted wall's tangent. A wall touched by both ends therefore pushes twice its penetration in one pass, which the next pass does not undo.
+- The resolver never changes `theta`. A capsule wedged across a gap narrower than its length stays wedged until the planner turns it.
+
 ## Adding a resolver
 
 1. Subclass `CollisionResolver` under `collision/`.

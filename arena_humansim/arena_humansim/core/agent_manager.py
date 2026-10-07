@@ -59,6 +59,7 @@ from std_msgs.msg import Header
 
 from arena_humansim.animation import MotionAnimation
 from arena_humansim.collision import CollisionResolver
+from arena_humansim.core import interaction_classes
 from arena_humansim.core.agents import (
     BUILTIN_AGENTS,
     AgentType,
@@ -75,6 +76,7 @@ from arena_humansim.core.despawn_monitor import DespawnMonitor
 from arena_humansim.core.formation.clearance import Clearance
 from arena_humansim.core.interaction_kinds import InteractionType
 from arena_humansim.core.interaction_manager import InteractionManager
+from arena_humansim.core.locomotion import LocomotionExtension
 from arena_humansim.core.logger import SimulationLogger
 from arena_humansim.core.pool import KIND_ROBOT, AgentPool, PoolAware
 from arena_humansim.core.recorder import BagRecorder, default_record_dir
@@ -392,6 +394,7 @@ class AgentManager(Node):
             self._module_selections["collision"],
         )
         self._clearance = Clearance()
+        self._locomotion = LocomotionExtension()
         self._wall_aware: tuple[WallAware, ...] = (
             self._local_planner,
             self._global_planner,
@@ -406,6 +409,7 @@ class AgentManager(Node):
             self._collision,
             self._occluder,
             self._clearance,
+            self._locomotion,
             *self._perception_cache.values(),
         )
 
@@ -1123,6 +1127,8 @@ class AgentManager(Node):
             self._agent_types[agent_type.name] = agent_type
             rng = self._rng.get_agent_substream(aid, "params")
             planner_name = agent_type.local_planner or self._module_selections["local_planner"]
+            if agent_type.local_planner:
+                self._module_pool[planner_name] = self._policies[self._resolve_policy_idx(planner_name)]
             agent = create_agent(agent_type, state, self._module_pool, self._module_selections, rng, local_planner_means=self._local_planner_means(planner_name))
         else:
             planner_name = self._module_selections["local_planner"]
@@ -1186,6 +1192,13 @@ class AgentManager(Node):
 
         agent.movement = WaypointMovement(waypoints=waypoints)
         return agent
+
+    def _spawn_policy_idx(self, aid: int, agent: BaseAgent) -> int:
+        """Policy of a human spawned without an explicit one: the planner its type pins, else the default."""
+        if not self._pinned[aid].local_planner or self._force_local_planner:
+            return self._default_policy_idx
+        self._pinned[aid] = attrs.evolve(self._pinned[aid], policy=True)
+        return self._policy_name_to_idx[agent.params.local_planner]
 
     def _build_base_agent_from_spawn(
         self,
@@ -1354,7 +1367,7 @@ class AgentManager(Node):
             agent = self._build_base_agent_from_spawn(aid, spawn_req)
             self._agents[aid] = agent
             idx = self._pool.add_agent(agent)
-            self._pool.policy_idx[idx] = self._default_policy_idx
+            self._pool.policy_idx[idx] = self._spawn_policy_idx(aid, agent)
             self._pool_agent_ids.append(aid)
             self._mark_roster_dirty()
             self._compile_behavior_tree(agent)
@@ -1468,6 +1481,7 @@ class AgentManager(Node):
             self._phase_end("global_plan", t0)
 
         t0 = time.perf_counter()
+        self._locomotion.restore(pool)
         pool.store_prev_vel()
         n = pool.n
         active_mask = pool.policy_idx[:n] != -1
@@ -1481,6 +1495,7 @@ class AgentManager(Node):
                 self._local_plan_fallback(agents, self._cached_intermediate_goals, pool)
         else:
             saved_has_goal = pool.has_goal[:n].copy()
+            saved_vel = pool.vel[:n].copy()
             pool.has_goal[:n] = saved_has_goal & active_mask
             accum_vel = np.zeros_like(pool.vel[:n])
             for pidx in np.unique(pool.policy_idx[:n]):
@@ -1490,6 +1505,7 @@ class AgentManager(Node):
                 own_mask = pool.policy_idx[:n] == int(pidx)
                 if planner.supports_pool:
                     pool.has_goal[:n] = saved_has_goal & active_mask & own_mask
+                    pool.vel[:n] = saved_vel
                     planner.compute_pool(pool, store_forces=self._publish_markers >= 2, dt=self._dt)
                     accum_vel[own_mask] = pool.vel[:n][own_mask]
                 else:
@@ -1571,6 +1587,7 @@ class AgentManager(Node):
         t0 = time.perf_counter()
         self._apply_arrival_damp(pool)
         self._apply_kinematic_constraints_vectorized(pool)
+        self._locomotion.constrain(pool, self._dt, self._provides_heading_mask(pool))
         self._apply_external_velocity_pins()
         self._phase_end("kinematics", t0)
 
@@ -1760,6 +1777,14 @@ class AgentManager(Node):
             pool.vel[i, 0] = v[0]
             pool.vel[i, 1] = v[1]
 
+    def _provides_heading_mask(self, pool: AgentPool) -> np.ndarray:
+        n = pool.n
+        provides_heading = np.zeros(n, dtype=np.bool_)
+        for pidx, planner in enumerate(self._policies):
+            if planner.provides_heading:
+                provides_heading |= pool.policy_idx[:n] == pidx
+        return provides_heading
+
     def _integrate_state_vectorized(self, pool: AgentPool) -> None:
         n = pool.n
         if n == 0:
@@ -1769,21 +1794,21 @@ class AgentManager(Node):
         pos = pool.pos[:n]
         theta = pool.theta[:n]
 
-        pos += vel * dt
-
-        provides_heading = np.zeros(n, dtype=np.bool_)
-        for pidx, planner in enumerate(self._policies):
-            if planner.provides_heading:
-                provides_heading |= pool.policy_idx[:n] == pidx
-
         speed = np.linalg.norm(vel, axis=1)
         moving = speed > self._min_speed_for_heading
         vel_theta = np.arctan2(vel[:, 1], vel[:, 0])
+
+        self._locomotion.overlay(pool, dt)
+        pos += vel * dt
+
+        provides_heading = self._provides_heading_mask(pool)
+        heading_owned = self._locomotion.heading_owned_mask(n)
+
         goal_theta = pool.goal_theta[:n]
         has_goal_theta = pool.has_goal_theta[:n]
         # an explicit heading goal wins over velocity heading, formation speeds rarely settle below min_speed_for_heading
         target_theta = np.where(has_goal_theta, goal_theta, vel_theta)
-        rotating = (moving & ~provides_heading & ~has_goal_theta) | has_goal_theta
+        rotating = (moving & ~provides_heading & ~heading_owned & ~has_goal_theta) | has_goal_theta
         delta = np.arctan2(
             np.sin(target_theta - theta),
             np.cos(target_theta - theta),
@@ -2147,6 +2172,7 @@ class AgentManager(Node):
         self._agents[aid] = agent
         idx = self._pool.add_agent(agent)
         self._pool.kind[idx] = KIND_ROBOT
+        self._pool.interaction_class[idx] = interaction_classes.ROBOT
         self._pool_agent_ids.append(aid)
         self._mark_roster_dirty()
         self._behavior_trees[aid] = None
@@ -2274,6 +2300,9 @@ class AgentManager(Node):
         msg.kind = _flat("B", pool.kind[rows])
         msg.animation_state = _flat("B", pool.animation_state[rows])
         msg.policy_idx = _flat("h", np.where((pidx >= 0) & (pidx < len(self._policy_names)), pidx, -1))
+        gait_phase, gait_cadence = self._locomotion.frame_arrays(rows)
+        msg.gait_phase = _flat("d", gait_phase)
+        msg.gait_cadence = _flat("d", gait_cadence)
         return msg
 
     def _publish_agent_meta(self, header: Header) -> None:
@@ -2288,16 +2317,18 @@ class AgentManager(Node):
             tuple(ids),
             tuple(names.get(aid, "") for aid in ids),
             tuple(agent.params.handedness if agent is not None else "" for agent in agents),
+            tuple(agent.params.name if agent is not None else "" for agent in agents),
         )
         if content == self._meta_published:
             return
         self._meta_published = content
-        policies, _, agent_names, handedness = content
+        policies, _, agent_names, handedness, agent_types = content
         msg = AgentMetaMsg(header=header)
         msg.policies = list(policies)
         msg.agent_id = array.array("i", ids)
         msg.name = list(agent_names)
         msg.handedness = list(handedness)
+        msg.agent_type = list(agent_types)
         self._agent_meta_pub.publish(msg)
 
     def _publish_agent_gestures(self, header: Header) -> None:
@@ -2513,6 +2544,8 @@ class AgentManager(Node):
             agent = self._build_base_agent(aid, agent_msg, waypoints)
             if policy_name and not self._force_local_planner:
                 self._pinned[aid] = attrs.evolve(self._pinned[aid], policy=True)
+            elif kind == 0:
+                policy_idx = self._spawn_policy_idx(aid, agent)
             agent.state.kind = kind
             agent.movement = WaypointMovement(
                 waypoints=waypoints,
@@ -2522,6 +2555,8 @@ class AgentManager(Node):
             self._agents[aid] = agent
             idx = self._pool.add_agent(agent)
             self._pool.kind[idx] = kind
+            if kind == KIND_ROBOT:
+                self._pool.interaction_class[idx] = interaction_classes.ROBOT
             self._pool.policy_idx[idx] = policy_idx
             self._pool_agent_ids.append(aid)
             self._mark_roster_dirty()

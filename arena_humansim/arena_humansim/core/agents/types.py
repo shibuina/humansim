@@ -4,9 +4,13 @@ __all__ = [
     "AttentionDef",
     "AttentionRef",
     "AttentionStepDef",
+    "CadenceDist",
     "ChannelDef",
     "ClipDef",
     "GoToStepDef",
+    "HEADING_SOURCES",
+    "KINEMATICS",
+    "LocomotionDist",
     "NeedCondition",
     "NeedDist",
     "ParamDist",
@@ -14,6 +18,7 @@ __all__ = [
     "Pose3",
     "RelativeRef",
     "RobotRef",
+    "SampledLocomotion",
     "SampledNeed",
     "SampledParams",
     "SampledPerception",
@@ -25,7 +30,7 @@ __all__ = [
 ]
 
 import math
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
 from pathlib import Path
 
 import attrs
@@ -247,6 +252,47 @@ class PerceptionDist:
     vision_occlusion: bool = True
 
 
+KINEMATICS = ("holonomic", "along_heading")
+HEADING_SOURCES = {"attraction": 0.0, "total": 1.0}
+MAX_HARMONICS = 3
+
+Harmonics = tuple[tuple[float, float], ...]
+
+
+def _as_harmonics(val: Iterable[Iterable[float]] | None) -> Harmonics:
+    if val is None:
+        return ()
+    out = tuple((float(amp), float(phase)) for amp, phase in val)
+    if len(out) > MAX_HARMONICS:
+        raise ValueError(f"at most {MAX_HARMONICS} harmonics, got {len(out)}")
+    return out
+
+
+def _zero_dist() -> ParamDist:
+    return ParamDist(0.0, clip_low=0.0)
+
+
+@attrs.frozen
+class CadenceDist:
+    base: ParamDist = attrs.field(default=ParamDist(0.4), converter=_as_paramdist)
+    per_speed: ParamDist = attrs.field(default=ParamDist(0.55), converter=_as_paramdist)
+    min: ParamDist = attrs.field(default=ParamDist(0.4), converter=_as_paramdist)
+    max: ParamDist = attrs.field(default=ParamDist(2.2), converter=_as_paramdist)
+
+
+@attrs.frozen
+class LocomotionDist:
+    kinematics: str = attrs.field(default="holonomic", validator=attrs.validators.in_(KINEMATICS))
+    cadence: CadenceDist = attrs.Factory(CadenceDist)
+    phase_warp_split: ParamDist = attrs.field(default=ParamDist(0.5), converter=_as_paramdist)
+    speed_profile: Harmonics = attrs.field(default=(), converter=_as_harmonics)
+    speed_amplitude_scale: ParamDist = attrs.field(default=ParamDist(1.0), converter=_as_paramdist)
+    lateral_profile: Harmonics = attrs.field(default=(), converter=_as_harmonics)
+    footprint_length: ParamDist = attrs.field(factory=_zero_dist, converter=_as_paramdist)
+    recovery_stall_after_s: ParamDist = attrs.field(factory=_zero_dist, converter=_as_paramdist)
+    recovery_reverse_m: ParamDist = attrs.field(factory=_zero_dist, converter=_as_paramdist)
+
+
 @attrs.frozen
 class AgentType:
     name: str
@@ -269,6 +315,11 @@ class AgentType:
 
     perception: PerceptionDist = attrs.Factory(PerceptionDist)
     local_planner_params: dict[str, ParamDist] = attrs.Factory(dict)
+    locomotion: LocomotionDist = attrs.Factory(LocomotionDist)
+    locomotion_active: bool = False
+    pose: dict = attrs.Factory(dict)
+    interaction_class: str = ""
+    assets: tuple[str, ...] = ()
 
     perception_stack: tuple[str, ...] = ("default",)
     local_planner: str | None = None
@@ -301,6 +352,23 @@ class SampledPerception:
 
 
 @attrs.frozen
+class SampledLocomotion:
+    active: bool = False
+    kinematics: int = 0
+    cadence_base: float = 0.4
+    cadence_per_speed: float = 0.55
+    cadence_min: float = 0.4
+    cadence_max: float = 2.2
+    phase_warp_split: float = 0.5
+    speed_profile: Harmonics = attrs.field(default=(), converter=_as_harmonics)
+    speed_amplitude_scale: float = 1.0
+    lateral_profile: Harmonics = attrs.field(default=(), converter=_as_harmonics)
+    footprint_length: float = 0.0
+    recovery_stall_after_s: float = 0.0
+    recovery_reverse_m: float = 0.0
+
+
+@attrs.frozen
 class SampledParams:
     name: str
 
@@ -317,6 +385,8 @@ class SampledParams:
 
     perception: SampledPerception = attrs.Factory(SampledPerception)
     local_planner_params: dict[str, float] = attrs.Factory(dict)
+    locomotion: SampledLocomotion = attrs.Factory(SampledLocomotion)
+    interaction_class: str = ""
 
     perception_stack: tuple[str, ...] = ("default",)
     local_planner: str | None = None
@@ -353,6 +423,25 @@ def _sample_lognormal_dist(dist: ParamDist, rng: np.random.Generator) -> float:
     else:
         value = dist.mean
     return float(np.clip(value, dist.clip_low, dist.clip_high))
+
+
+def _sample_locomotion(agent_type: AgentType, rng: np.random.Generator) -> SampledLocomotion:
+    loc = agent_type.locomotion
+    return SampledLocomotion(
+        active=agent_type.locomotion_active,
+        kinematics=KINEMATICS.index(loc.kinematics),
+        cadence_base=_sample_dist(loc.cadence.base, rng),
+        cadence_per_speed=_sample_dist(loc.cadence.per_speed, rng),
+        cadence_min=_sample_dist(loc.cadence.min, rng),
+        cadence_max=_sample_dist(loc.cadence.max, rng),
+        phase_warp_split=_sample_dist(loc.phase_warp_split, rng),
+        speed_profile=loc.speed_profile,
+        speed_amplitude_scale=_sample_dist(loc.speed_amplitude_scale, rng),
+        lateral_profile=loc.lateral_profile,
+        footprint_length=_sample_dist(loc.footprint_length, rng),
+        recovery_stall_after_s=_sample_dist(loc.recovery_stall_after_s, rng),
+        recovery_reverse_m=_sample_dist(loc.recovery_reverse_m, rng),
+    )
 
 
 def sample_agent_type(
@@ -395,6 +484,7 @@ def sample_agent_type(
 
     idle_gaze_rate_hz = _sample_dist(agent_type.idle_gaze_rate, rng)
     handedness = _sample_handedness(agent_type.handedness, rng)
+    locomotion = _sample_locomotion(agent_type, rng)
 
     return SampledParams(
         name=agent_type.name,
@@ -409,6 +499,8 @@ def sample_agent_type(
         personal_space_min=personal_space_min,
         perception=sampled_perception,
         local_planner_params=sampled_lp,
+        locomotion=locomotion,
+        interaction_class=agent_type.interaction_class,
         perception_stack=agent_type.perception_stack,
         local_planner=agent_type.local_planner,
         global_planner=agent_type.global_planner,

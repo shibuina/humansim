@@ -11,3 +11,5 @@ float64[] radius             # collision radius (m)
 uint8[] kind                 # AgentState.KIND_*
 uint8[] animation_state
 int16[] policy_idx           # into AgentMeta.policies, -1 = teleport-only
+float64[] gait_phase         # cycle phase in rad, 0 = not provided
+float64[] gait_cadence       # cycle rate in Hz, 0 = unknown

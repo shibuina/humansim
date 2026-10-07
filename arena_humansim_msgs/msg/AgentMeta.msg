@@ -4,3 +4,4 @@ string[] policies            # registered local planner names, by policy_idx
 int32[] agent_id
 string[] name                # empty = unnamed
 string[] handedness          # l | r, empty = right
+string[] agent_type          # agent type name, empty = adult

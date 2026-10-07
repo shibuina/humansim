@@ -1,0 +1,31 @@
+# Subject driving 8m into a 2.0m dead-end corridor, turning around and driving back out.
+
+name: wheelchair_corridor_u_turn
+description: >-
+  2.0m wide corridor closed at its east end. The subject drives 8m in to a
+  goal 1m short of the end wall, then returns to its start, so it has to
+  turn around inside the corridor width.
+
+simulation:
+  seed: 1
+  dt: 0.05
+  bt_tick_interval: 5
+  max_ticks: 1200
+
+modules:
+  global_planner: navmesh
+
+agents:
+  - agent_id: 1000
+    agent_type: wheelchair_manual
+    desired_velocity: 0.0
+    agent_radius: 0.0
+    spawn_pose: {x: 1.0, y: 0.0, theta: 0.0}
+    goal_sequence: [{x: 9.0, y: 0.0}, {x: 1.0, y: 0.0}]
+
+walls:
+  - {name: north, start: {x: -2.0, y:  1.0}, end: {x: 10.0, y:  1.0}}
+  - {name: south, start: {x: -2.0, y: -1.0}, end: {x: 10.0, y: -1.0}}
+  - {name: end,   start: {x: 10.0, y: -1.0}, end: {x: 10.0, y:  1.0}}
+
+interaction_scripts: []

@@ -1,0 +1,53 @@
+name: wheelchair_manual
+extends: adult
+interaction_class: wheelchair
+assets: [human::mobility::wheelchair]
+
+agent_radius: 0.325
+desired_velocity: {mean: 0.9, std: 0.15, clip_low: 0.3, clip_high: 1.4}
+max_acceleration: {mean: 1.2, std: 0.1, clip_low: 0.5, clip_high: 2.5}
+min_turning_radius: 0.05
+pivot_angular_velocity: {mean: 1.2, std: 0.2, clip_low: 0.6, clip_high: 2.0}
+
+local_planner: hsfm
+local_planner_params:
+  lateral_gain: 0.0
+  heading_source: total
+
+locomotion:
+  kinematics: along_heading
+  cadence: {base: 0.6, per_speed: 0.4, min: 0.6, max: 1.4}
+  speed_profile:
+    harmonics: [[0.12, 0.0], [0.05, 1.1]]
+    amplitude_scale: {mean: 1.0, std: 0.15, clip_low: 0.5, clip_high: 1.5}
+  footprint_length: 1.1
+  recovery: {stall_after_s: 3.0, reverse_m: 0.3}
+
+pose:
+  walk:
+    base: seated_wheelchair
+    symmetric: false
+    gain: {min: 1.0, max: 1.0}
+    limits:
+      l_elbow: [-0.25, 2.5]
+      r_elbow: [-0.25, 2.5]
+      l_p_collar: [-0.45, 0.6]
+      r_p_collar: [-0.45, 0.6]
+    joints:
+      l_y_shoulder: {set: {mean: 1.9696, harmonics: [[0.7457, 2.1307], [0.0928, -1.314], [0.0824, -0.112]]}}
+      r_y_shoulder: {set: {mean: -1.9696, harmonics: [[0.7457, -1.0109], [0.0928, 1.8276], [0.0824, 3.0296]]}}
+      l_p_shoulder: {set: {mean: 0.5458, harmonics: [[0.1053, -2.4319], [0.123, 2.1814], [0.019, -0.6204]]}}
+      r_p_shoulder: {set: {mean: 0.5458, harmonics: [[0.1053, -2.4319], [0.123, 2.1814], [0.019, -0.6204]]}}
+      l_r_shoulder: {set: {mean: 1.8955, harmonics: [[0.7525, 2.0978], [0.0648, -0.8767], [0.0256, 1.1431]]}}
+      r_r_shoulder: {set: {mean: -1.8955, harmonics: [[0.7525, -1.0438], [0.0648, 2.2649], [0.0256, -1.9985]]}}
+      l_elbow: {set: {mean: 0.1592, harmonics: [[0.5002, 2.9013], [0.1301, -1.6278], [0.0426, 0.2387]]}}
+      r_elbow: {set: {mean: 0.1592, harmonics: [[0.5002, 2.9013], [0.1301, -1.6278], [0.0426, 0.2387]]}}
+      waist: {set: {mean: -0.0719, harmonics: [[0.0939, -2.6381], [0.0615, 2.5759]]}}
+      p_head: {set: {mean: -0.1719, harmonics: [[0.0939, -2.6381], [0.0615, 2.5759]]}}
+      l_p_collar: {set: {mean: -0.1354, harmonics: [[0.1924, 1.6138], [0.073, -1.4867]]}}
+      r_p_collar: {set: {mean: -0.1354, harmonics: [[0.1924, 1.6138], [0.073, -1.4867]]}}
+  idle:
+    base: seated_wheelchair
+  run:
+    same_as: walk
+    gain: {factor: 1.0}

@@ -74,6 +74,8 @@ def frame_msg(t_ns: int, agents: list[Agent], policies: list[str]) -> AgentFrame
     msg.kind = [a.kind for a in agents]
     msg.animation_state = [0 for _ in agents]
     msg.policy_idx = [policies.index(a.policy) if a.policy else -1 for a in agents]
+    msg.gait_phase = [0.0 for _ in agents]
+    msg.gait_cadence = [0.0 for _ in agents]
     return msg
 
 

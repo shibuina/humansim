@@ -1,0 +1,63 @@
+# Subject crossing an 8m open area through a perpendicular bidirectional adult flow.
+
+name: wheelchair_crowd_crossing
+description: >-
+  Open 12m x 16m hall. Two opposed sources feed a north-south adult flow
+  (0.5 ped/s each) through the middle. The subject spawns after the flow
+  has formed and crosses 8m west-to-east through it.
+
+simulation:
+  seed: 1
+  dt: 0.05
+  bt_tick_interval: 5
+  max_ticks: 1100
+
+modules:
+  global_planner: navmesh
+
+flow:
+  sources:
+    - pose: {x: 0.0, y: -6.5, theta: 1.5708}
+      shape: {type: circle, radius: 0.8}
+      rate_profile: [{t: 0.0, rate: 0.5}]
+      max_concurrent: 12
+      max_total: -1
+      agent_template:
+        desired_velocity_min: 1.0
+        desired_velocity_max: 1.3
+        agent_radius: 0.25
+        agent_type: adult
+        sink_affinity: [{sink_idx: 0, weight: 1.0}]
+
+    - pose: {x: 0.0, y: 6.5, theta: -1.5708}
+      shape: {type: circle, radius: 0.8}
+      rate_profile: [{t: 0.0, rate: 0.5}]
+      max_concurrent: 12
+      max_total: -1
+      agent_template:
+        desired_velocity_min: 1.0
+        desired_velocity_max: 1.3
+        agent_radius: 0.25
+        agent_type: adult
+        sink_affinity: [{sink_idx: 1, weight: 1.0}]
+
+  sinks:
+    - {pose: {x: 0.0, y:  7.0, theta: 0.0}, shape: {type: circle, radius: 1.0}, absorption_radius: 1.0, capacity: -1}
+    - {pose: {x: 0.0, y: -7.0, theta: 0.0}, shape: {type: circle, radius: 1.0}, absorption_radius: 1.0, capacity: -1}
+
+agents:
+  - agent_id: 1000
+    agent_type: wheelchair_manual
+    desired_velocity: 0.0
+    agent_radius: 0.0
+    spawn_pose: {x: -4.0, y: 0.0, theta: 0.0}
+    goal_sequence: [{x: 4.0, y: 0.0}]
+    spawn_tick: 200
+
+walls:
+  - {name: north, start: {x: -6.0, y:  8.0}, end: {x: 6.0, y:  8.0}}
+  - {name: south, start: {x: -6.0, y: -8.0}, end: {x: 6.0, y: -8.0}}
+  - {name: west,  start: {x: -6.0, y: -8.0}, end: {x: -6.0, y: 8.0}}
+  - {name: east,  start: {x:  6.0, y: -8.0}, end: {x:  6.0, y: 8.0}}
+
+interaction_scripts: []

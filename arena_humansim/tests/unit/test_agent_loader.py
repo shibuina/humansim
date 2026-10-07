@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 
+import attrs
 import pytest
 from arena_humansim.core.agents import loader
 from arena_humansim.core.agents.types import AgentType
@@ -121,3 +123,60 @@ def test_load_agent_types_without_extends_returns_structured(tmp_path: Path, mon
     assert "plain" in result
     assert isinstance(result["plain"], AgentType)
     assert result["plain"].name == "plain"
+
+
+def _load_dir_with_warnings(directory: Path, caplog: pytest.LogCaptureFixture) -> tuple[set[str], list[str]]:
+    """Names loaded from the directory and the loader's warning messages, with the handler on the logger itself since it may not propagate."""
+    loader._log.addHandler(caplog.handler)
+    try:
+        with caplog.at_level(logging.WARNING, logger=loader._log.name):
+            result = loader.load_agent_types_raw_from_dir(directory)
+    finally:
+        loader._log.removeHandler(caplog.handler)
+    records = {id(r): r for r in caplog.records if r.name == loader._log.name}
+    return set(result), [r.getMessage() for r in records.values()]
+
+
+def test_load_agent_types_raw_from_dir_warns_and_skips_unknown_locomotion_key(tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
+    (tmp_path / "good.yaml").write_text("name: good\nlocomotion: {kinematics: along_heading}\n")
+    (tmp_path / "typo.yaml").write_text("name: typo\nlocomotion: {kinematix: along_heading}\n")
+
+    names, warnings = _load_dir_with_warnings(tmp_path, caplog)
+
+    assert names == {"good"}
+    assert len(warnings) == 1
+    assert "typo.yaml" in warnings[0]
+    assert "kinematix" in warnings[0]
+
+
+def test_load_agent_types_raw_from_dir_skips_scenario_files_silently(tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
+    (tmp_path / "good.yaml").write_text("name: good\n")
+    (tmp_path / "scene.yaml").write_text("name: scene\ndescription: two rooms\nsimulation: {seed: 1}\nmodules: {local_planner: hsfm}\nagents: []\nwalls: []\n")
+    for key in loader.SCENARIO_ONLY_KEYS:
+        (tmp_path / f"only_{key}.yaml").write_text(f"name: only_{key}\n{key}: null\n")
+
+    names, warnings = _load_dir_with_warnings(tmp_path, caplog)
+
+    assert names == {"good"}
+    assert warnings == []
+
+
+def test_scenario_only_keys_are_the_scenario_fields_an_agent_type_lacks() -> None:
+    from arena_humansim.utils.scenario import ScenarioConfig
+
+    scenario = {f.name for f in attrs.fields(ScenarioConfig)}
+    agent_type = {f.name for f in attrs.fields(AgentType)}
+    assert set(loader.SCENARIO_ONLY_KEYS) == scenario - agent_type
+    assert len(set(loader.SCENARIO_ONLY_KEYS)) == len(loader.SCENARIO_ONLY_KEYS)
+
+
+def test_load_agent_type_from_file_extending_adult_with_locomotion(tmp_path: Path) -> None:
+    path = tmp_path / "cart.yaml"
+    path.write_text("name: cart\nextends: adult\nlocomotion:\n  cadence: {max: 1.2}\n")
+
+    at = loader.load_agent_type_from_file(path)
+
+    assert at.locomotion_active is True
+    assert at.locomotion.cadence.max.mean == 1.2
+    assert at.locomotion.cadence.base.mean == 0.4
+    assert at.desired_velocity.mean == 1.1

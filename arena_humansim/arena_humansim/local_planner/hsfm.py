@@ -16,6 +16,7 @@ if TYPE_CHECKING:
     from arena_humansim.core.pool import AgentPool
 
 _EPS = 1e-6
+_MAX_TOTAL_DEVIATION = math.pi / 2.0
 
 
 def _wrap(angle: np.ndarray) -> np.ndarray:
@@ -32,6 +33,7 @@ class HSFMPlanner(SFMPlanner):
         "lateral_damping": ParamDist(1.5, 0.0, clip_low=0.0),
         "angular_gain": ParamDist(4.0, 0.0, clip_low=0.5),
         "angular_damping": ParamDist(4.0, 0.0, clip_low=0.1),
+        "heading_source": ParamDist(0.0, 0.0, clip_low=0.0, clip_high=1.0),
     }
 
     def __init__(
@@ -46,6 +48,7 @@ class HSFMPlanner(SFMPlanner):
         self._lateral_damping = np.zeros(0, dtype=np.float64)
         self._angular_gain = np.zeros(0, dtype=np.float64)
         self._angular_damping = np.zeros(0, dtype=np.float64)
+        self._heading_source = np.zeros(0, dtype=np.float64)
 
     def _allocate_soa(self, cap: int) -> None:
         super()._allocate_soa(cap)
@@ -53,6 +56,7 @@ class HSFMPlanner(SFMPlanner):
         self._lateral_damping = np.zeros(cap, dtype=np.float64)
         self._angular_gain = np.zeros(cap, dtype=np.float64)
         self._angular_damping = np.zeros(cap, dtype=np.float64)
+        self._heading_source = np.zeros(cap, dtype=np.float64)
 
     def on_pool_grow(self, new_capacity: int, old_capacity: int) -> None:
         super().on_pool_grow(new_capacity, old_capacity)
@@ -60,6 +64,7 @@ class HSFMPlanner(SFMPlanner):
         self._lateral_damping = _resize_1d(self._lateral_damping, new_capacity, old_capacity)
         self._angular_gain = _resize_1d(self._angular_gain, new_capacity, old_capacity)
         self._angular_damping = _resize_1d(self._angular_damping, new_capacity, old_capacity)
+        self._heading_source = _resize_1d(self._heading_source, new_capacity, old_capacity)
 
     def on_pool_add(self, idx: int, agent: BaseAgent) -> None:
         super().on_pool_add(idx, agent)
@@ -68,6 +73,7 @@ class HSFMPlanner(SFMPlanner):
         self._lateral_damping[idx] = self._param(lp, "lateral_damping")
         self._angular_gain[idx] = self._param(lp, "angular_gain")
         self._angular_damping[idx] = self._param(lp, "angular_damping")
+        self._heading_source[idx] = self._param(lp, "heading_source")
 
     def on_pool_swap(self, idx: int, last: int) -> None:
         super().on_pool_swap(idx, last)
@@ -75,6 +81,23 @@ class HSFMPlanner(SFMPlanner):
         self._lateral_damping[idx] = self._lateral_damping[last]
         self._angular_gain[idx] = self._angular_gain[last]
         self._angular_damping[idx] = self._angular_damping[last]
+        self._heading_source[idx] = self._heading_source[last]
+
+    def _desired_heading(self, pool: AgentPool, f_att: np.ndarray, total_f: np.ndarray, at_goal: np.ndarray) -> np.ndarray:
+        n = pool.n
+        theta = pool.theta[:n]
+        f_att_norm = np.hypot(f_att[:, 0], f_att[:, 1])
+        has_dir = f_att_norm > _EPS
+        theta_des = np.where(has_dir, np.arctan2(f_att[:, 1], f_att[:, 0]), theta)
+        from_total = self._heading_source[:n] >= 0.5
+        if np.any(from_total):
+            from_total &= np.hypot(total_f[:, 0], total_f[:, 1]) > _EPS
+            total_dir = np.arctan2(total_f[:, 1], total_f[:, 0])
+            d_goal = pool.goal_pos[:n] - pool.pos[:n]
+            bearing = np.arctan2(d_goal[:, 1], d_goal[:, 0])
+            limited = bearing + np.clip(_wrap(total_dir - bearing), -_MAX_TOTAL_DEVIATION, _MAX_TOTAL_DEVIATION)
+            theta_des = np.where(from_total, np.where(at_goal, total_dir, limited), theta_des)
+        return theta_des
 
     def compute_pool(self, pool: AgentPool, store_forces: bool = False, dt: float = 1.0) -> None:
         n = pool.n
@@ -122,10 +145,7 @@ class HSFMPlanner(SFMPlanner):
             dtype=np.float64,
         )
 
-        f_att_norm = np.hypot(f_att[:, 0], f_att[:, 1])
-        has_dir = f_att_norm > _EPS
-        theta_des = np.where(has_dir, np.arctan2(f_att[:, 1], f_att[:, 0]), theta)
-        err = _wrap(theta_des - theta)
+        err = _wrap(self._desired_heading(pool, f_att, total_f, at_goal) - theta)
 
         alpha = k_ang * err - k_ang_d * omega_arr
         omega_arr = omega_arr + alpha * dt
@@ -200,8 +220,15 @@ class HSFMPlanner(SFMPlanner):
             velocities[aid] = (float(new_vx), float(new_vy))
 
             f_att_norm = math.hypot(f_att_x, f_att_y)
-            if f_att_norm > _EPS:
-                theta_des = math.atan2(f_att_y, f_att_x)
+            from_total = self._param(lp, "heading_source") >= 0.5 and math.hypot(total_fx, total_fy) > _EPS
+            if from_total or f_att_norm > _EPS:
+                if from_total:
+                    theta_des = math.atan2(goal.y - agent.state.pose.y, goal.x - agent.state.pose.x)
+                    deviation = math.atan2(total_fy, total_fx) - theta_des
+                    deviation = math.atan2(math.sin(deviation), math.cos(deviation))
+                    theta_des += min(max(deviation, -_MAX_TOTAL_DEVIATION), _MAX_TOTAL_DEVIATION)
+                else:
+                    theta_des = math.atan2(f_att_y, f_att_x)
                 err = math.atan2(math.sin(theta_des - theta), math.cos(theta_des - theta))
                 omega = self._omega.get(aid, 0.0)
                 alpha = lp["angular_gain"] * err - lp["angular_damping"] * omega

@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING
 import attrs
 
 from arena_humansim.core.agents import SampledParams
-from arena_humansim.core.agents.types import SampledPerception
+from arena_humansim.core.agents.types import SampledLocomotion, SampledPerception
 from arena_humansim.utils.loggable import Loggable
 from arena_humansim.utils.types import AgentState, CommandType, HighLevelCommand, Pose2D
 
@@ -75,6 +75,7 @@ class ReplayManager(Loggable):
         p = spawn["params"]
         perc = p.get("perception", {})
         lp = p.get("local_planner_params", {})
+        loc = p.get("locomotion", {})
         return SampledParams(
             name=p["name"],
             desired_velocity=p["desired_velocity"],
@@ -96,6 +97,8 @@ class ReplayManager(Loggable):
                 "repulsion_range": lp.get("repulsion_range", p.get("repulsion_range", 0.3)),
                 "anisotropy": lp.get("anisotropy", p.get("anisotropy", 0.5)),
             },
+            locomotion=SampledLocomotion(**loc),
+            interaction_class=p.get("interaction_class", ""),
             perception_stack=tuple(p["perception_stack"]),
             local_planner=p["local_planner"],
             global_planner=p["global_planner"],

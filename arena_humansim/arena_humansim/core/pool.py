@@ -76,6 +76,8 @@ class AgentPool:
         self.latched = np.zeros(capacity, dtype=np.bool_)
 
         self.kind = np.zeros(capacity, dtype=np.uint8)
+        self.interaction_class = np.zeros(capacity, dtype=np.int32)
+        self.axial_offset = np.zeros(capacity, dtype=np.float64)
         self.policy_idx = np.full(capacity, -1, dtype=np.int32)
         self.animation_state = np.zeros(capacity, dtype=np.uint8)
 
@@ -144,6 +146,8 @@ class AgentPool:
         self.latched[i] = False
         self.prev_vel[i] = self.vel[i]
         self.kind[i] = 0
+        self.interaction_class[i] = 0
+        self.axial_offset[i] = 0.0
         self.policy_idx[i] = -1
         self.animation_state[i] = agent.state.animation_state
 
@@ -177,6 +181,8 @@ class AgentPool:
                 self.has_goal_theta,
                 self.latched,
                 self.kind,
+                self.interaction_class,
+                self.axial_offset,
                 self.policy_idx,
                 self.animation_state,
             ):
@@ -293,6 +299,8 @@ class AgentPool:
         kind_new = np.zeros(new_cap, dtype=self.kind.dtype)
         kind_new[:old] = self.kind[:old]
         self.kind = kind_new
+        self.interaction_class = _resize_1d(self.interaction_class)
+        self.axial_offset = _resize_1d(self.axial_offset)
         pidx_new = np.full(new_cap, -1, dtype=self.policy_idx.dtype)
         pidx_new[:old] = self.policy_idx[:old]
         self.policy_idx = pidx_new

@@ -1,0 +1,170 @@
+{
+  "machine": "x86_64 / AMD Ryzen 9 9950X3D 16-Core Processor / numpy 2.4.6 / numba 0.68.0",
+  "seeds": [
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7,
+    8,
+    9,
+    10
+  ],
+  "dt": 0.05,
+  "budgets_s": {
+    "doorway": 40.0,
+    "corridor_head_on_adult": 45.0,
+    "corridor_head_on_robot": 45.0,
+    "crowd_crossing": 45.0,
+    "corridor_u_turn": 60.0,
+    "robot_parked": 45.0
+  },
+  "scenes": {
+    "doorway": {
+      "wheelchair_manual": {
+        "success_rate": 1.0,
+        "time_to_goal_s": 12.100000000000001,
+        "time_stuck_s": 0.025,
+        "path_efficiency": 0.9957589119800128,
+        "min_clearance_m": null,
+        "min_clearance_worst_m": null,
+        "max_wall_penetration_m": 0.0,
+        "max_wall_penetration_worst_m": 0.0,
+        "recovery_events": 0.0
+      },
+      "adult": {
+        "success_rate": 1.0,
+        "time_to_goal_s": 9.850000000000001,
+        "time_stuck_s": 0.0,
+        "path_efficiency": 0.9962605944123839,
+        "min_clearance_m": null,
+        "min_clearance_worst_m": null,
+        "max_wall_penetration_m": 0.0,
+        "max_wall_penetration_worst_m": 0.0,
+        "recovery_events": 0.0
+      }
+    },
+    "corridor_head_on_adult": {
+      "wheelchair_manual": {
+        "success_rate": 1.0,
+        "time_to_goal_s": 15.05,
+        "time_stuck_s": 0.05,
+        "path_efficiency": 0.9894707603033683,
+        "min_clearance_m": 2.7755575615628914e-17,
+        "min_clearance_worst_m": -5.551115123125783e-17,
+        "max_wall_penetration_m": 0.0,
+        "max_wall_penetration_worst_m": 0.0,
+        "recovery_events": 0.0
+      },
+      "adult": {
+        "success_rate": 1.0,
+        "time_to_goal_s": 12.325,
+        "time_stuck_s": 0.0,
+        "path_efficiency": 0.97736457828088,
+        "min_clearance_m": 0.0,
+        "min_clearance_worst_m": -5.551115123125783e-17,
+        "max_wall_penetration_m": 0.0,
+        "max_wall_penetration_worst_m": 0.0,
+        "recovery_events": 0.0
+      }
+    },
+    "corridor_head_on_robot": {
+      "wheelchair_manual": {
+        "success_rate": 1.0,
+        "time_to_goal_s": 16.4,
+        "time_stuck_s": 0.45,
+        "path_efficiency": 0.9624025833598909,
+        "min_clearance_m": -5.551115123125783e-17,
+        "min_clearance_worst_m": -2.220446049250313e-16,
+        "max_wall_penetration_m": 0.0,
+        "max_wall_penetration_worst_m": 0.0,
+        "recovery_events": 0.0
+      },
+      "adult": {
+        "success_rate": 1.0,
+        "time_to_goal_s": 12.875,
+        "time_stuck_s": 0.0,
+        "path_efficiency": 0.929625023789056,
+        "min_clearance_m": 0.0,
+        "min_clearance_worst_m": -5.551115123125783e-17,
+        "max_wall_penetration_m": 0.0,
+        "max_wall_penetration_worst_m": 0.0,
+        "recovery_events": 0.0
+      }
+    },
+    "crowd_crossing": {
+      "wheelchair_manual": {
+        "success_rate": 1.0,
+        "time_to_goal_s": 10.400000000000002,
+        "time_stuck_s": 0.05,
+        "path_efficiency": 0.9673626412059262,
+        "min_clearance_m": 0.008455727426346038,
+        "min_clearance_worst_m": -1.7311764061778145e-05,
+        "max_wall_penetration_m": 0.0,
+        "max_wall_penetration_worst_m": 0.0,
+        "recovery_events": 0.0
+      },
+      "adult": {
+        "success_rate": 1.0,
+        "time_to_goal_s": 7.9,
+        "time_stuck_s": 0.0,
+        "path_efficiency": 0.9829408176291985,
+        "min_clearance_m": 0.03316814784182898,
+        "min_clearance_worst_m": -0.0007181769660281612,
+        "max_wall_penetration_m": 0.0,
+        "max_wall_penetration_worst_m": 0.0,
+        "recovery_events": 0.0
+      }
+    },
+    "corridor_u_turn": {
+      "wheelchair_manual": {
+        "success_rate": 1.0,
+        "time_to_goal_s": 21.075000000000003,
+        "time_stuck_s": 1.475,
+        "path_efficiency": 0.9881917050785679,
+        "min_clearance_m": null,
+        "min_clearance_worst_m": null,
+        "max_wall_penetration_m": 0.0,
+        "max_wall_penetration_worst_m": 0.0,
+        "recovery_events": 0.0
+      },
+      "adult": {
+        "success_rate": 1.0,
+        "time_to_goal_s": 16.175,
+        "time_stuck_s": 0.05,
+        "path_efficiency": 0.9816435619540707,
+        "min_clearance_m": null,
+        "min_clearance_worst_m": null,
+        "max_wall_penetration_m": 0.0,
+        "max_wall_penetration_worst_m": 0.0,
+        "recovery_events": 0.0
+      }
+    },
+    "robot_parked": {
+      "wheelchair_manual": {
+        "success_rate": 1.0,
+        "time_to_goal_s": 13.15,
+        "time_stuck_s": 0.025,
+        "path_efficiency": 0.9713855674473422,
+        "min_clearance_m": 0.10276952486313551,
+        "min_clearance_worst_m": 0.06887940985941032,
+        "max_wall_penetration_m": 0.0,
+        "max_wall_penetration_worst_m": 0.0,
+        "recovery_events": 0.0
+      },
+      "adult": {
+        "success_rate": 1.0,
+        "time_to_goal_s": 11.3,
+        "time_stuck_s": 0.0,
+        "path_efficiency": 0.9516114731287411,
+        "min_clearance_m": 0.0808238861626458,
+        "min_clearance_worst_m": 0.0093154005360912,
+        "max_wall_penetration_m": 0.0,
+        "max_wall_penetration_worst_m": 0.0,
+        "recovery_events": 0.0
+      }
+    }
+  }
+}

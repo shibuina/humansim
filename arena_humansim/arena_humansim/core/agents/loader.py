@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import copy
+import logging
 from pathlib import Path
 from typing import Any
 
@@ -8,6 +9,8 @@ import attrs
 import yaml
 
 from .types import AgentType
+
+_log = logging.getLogger("arena_humansim.agent_types")
 
 _DICT_MERGE_FIELDS = {
     "needs",
@@ -17,7 +20,25 @@ _DICT_MERGE_FIELDS = {
     "vars",
     "perception",
     "local_planner_params",
+    "locomotion",
+    "pose",
 }
+
+_DEEP_MERGE_FIELDS = {"locomotion", "pose"}
+
+SCENARIO_ONLY_KEYS = (
+    "description",
+    "simulation",
+    "modules",
+    "agents",
+    "interaction_scripts",
+    "flow",
+    "agent_types",
+    "world_objects",
+    "walls",
+    "obstacles",
+    "event_scripts",
+)
 
 _TUPLE_FIELDS = {"perception_stack"}
 
@@ -60,6 +81,16 @@ def resolve_extends(
     return {name: resolved[name] for name in agent_types}
 
 
+def _merge_nested(parent: dict[str, Any], child: dict[str, Any]) -> dict[str, Any]:
+    merged = copy.deepcopy(parent)
+    for key, val in child.items():
+        if isinstance(val, dict) and isinstance(merged.get(key), dict):
+            merged[key] = _merge_nested(merged[key], val)
+        else:
+            merged[key] = copy.deepcopy(val)
+    return merged
+
+
 def _deep_merge(
     parent: dict[str, Any],
     child: dict[str, Any],
@@ -72,7 +103,11 @@ def _deep_merge(
     for key, child_val in child.items():
         if key in ("name", "extends"):
             continue
-        if key in _DICT_MERGE_FIELDS:
+        if key in _DEEP_MERGE_FIELDS:
+            if isinstance(child_val, dict):
+                parent_val = merged.get(key, {})
+                merged[key] = _merge_nested(parent_val if isinstance(parent_val, dict) else {}, child_val)
+        elif key in _DICT_MERGE_FIELDS:
             if isinstance(child_val, dict) and child_val:
                 parent_val = merged.get(key, {})
                 if not isinstance(parent_val, dict):
@@ -141,10 +176,12 @@ def load_agent_types_raw_from_dir(directory: Path) -> dict[str, tuple[dict[str, 
     for path in sorted(directory.glob("*.yaml")):
         try:
             name, raw, src = load_agent_type_raw_from_file(path)
+            if any(key in raw for key in SCENARIO_ONLY_KEYS):
+                continue
             _structure_raw(dict(raw), src)
             result[name] = (raw, src)
-        except Exception:
-            pass
+        except Exception as exc:
+            _log.warning("skipping agent type %s: %s", path, exc)
     return result
 
 

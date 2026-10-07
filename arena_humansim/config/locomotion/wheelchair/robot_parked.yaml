@@ -1,0 +1,36 @@
+# Subject passing a robot parked on the centerline of a 2.4m corridor.
+
+name: wheelchair_robot_parked
+description: >-
+  2.4m wide, 14m long corridor with a robot standing still on the
+  centerline (no policy, no goal). The subject drives west-to-east,
+  starting 0.3m off the centerline toward a goal on it, and has to pass
+  the robot on one side.
+
+simulation:
+  seed: 1
+  dt: 0.05
+  bt_tick_interval: 5
+  max_ticks: 900
+
+modules:
+  global_planner: navmesh
+
+agents:
+  - agent_id: 1000
+    agent_type: wheelchair_manual
+    desired_velocity: 0.0
+    agent_radius: 0.0
+    spawn_pose: {x: -5.0, y: 0.3, theta: 0.0}
+    goal_sequence: [{x: 5.0, y: 0.0}]
+  - agent_id: 1001
+    kind: 1
+    agent_type: robot
+    agent_radius: 0.3
+    spawn_pose: {x: 0.0, y: 0.0, theta: 0.0}
+
+walls:
+  - {name: north, start: {x: -7.0, y:  1.2}, end: {x: 7.0, y:  1.2}}
+  - {name: south, start: {x: -7.0, y: -1.2}, end: {x: 7.0, y: -1.2}}
+
+interaction_scripts: []

@@ -46,12 +46,51 @@ def _resolve_kernel(
     nx: int,
     ny: int,
     margin: float,
+    offset: np.ndarray,
+    theta: np.ndarray,
     corrected: np.ndarray,
 ) -> None:
     for i in prange(pos.shape[0]):
         corrected[i] = False
         threshold = radius[i] + margin
         buf = np.empty(_QUERY_CAPACITY, dtype=np.int64)
+        if offset[i] > 0.0:
+            ox = offset[i] * math.cos(theta[i])
+            oy = offset[i] * math.sin(theta[i])
+            for _ in range(3):
+                x = pos[i, 0]
+                y = pos[i, 1]
+                vx = vel[i, 0]
+                vy = vel[i, 1]
+                hit = False
+                cx = 0.0
+                cy = 0.0
+                for end in range(2):
+                    sign = 2.0 * end - 1.0
+                    px = x + sign * ox
+                    py = y + sign * oy
+                    k = query_walls(cell_start, cell_walls, wall_cx0, wall_cy0, origin_x, origin_y, cell, nx, ny, px, py, threshold, buf)
+                    if k > buf.shape[0]:
+                        buf = np.empty(k, dtype=np.int64)
+                        k = query_walls(cell_start, cell_walls, wall_cx0, wall_cy0, origin_x, origin_y, cell, nx, ny, px, py, threshold, buf)
+                    for c in range(k):
+                        dist, ux, uy = _contact(segments, buf[c], px, py)
+                        if dist < threshold - 1e-9:
+                            hit = True
+                            cx += ux * (threshold - dist)
+                            cy += uy * (threshold - dist)
+                            proj = vx * ux + vy * uy
+                            if proj < 0:
+                                vx -= proj * ux
+                                vy -= proj * uy
+                if not hit:
+                    break
+                corrected[i] = True
+                pos[i, 0] = x + cx
+                pos[i, 1] = y + cy
+                vel[i, 0] = vx
+                vel[i, 1] = vy
+            continue
         for _ in range(3):
             x = pos[i, 0]
             y = pos[i, 1]
@@ -90,7 +129,30 @@ def _resolve_kernel(
 
 
 @njit(cache=True)
-def _separate_kernel(pos: np.ndarray, vel: np.ndarray, radius: np.ndarray, movable: np.ndarray, pairs: np.ndarray) -> None:
+def _nearest_ends(pos: np.ndarray, offset: np.ndarray, theta: np.ndarray, i: int, j: int) -> tuple[float, float]:
+    oix = offset[i] * math.cos(theta[i])
+    oiy = offset[i] * math.sin(theta[i])
+    ojx = offset[j] * math.cos(theta[j])
+    ojy = offset[j] * math.sin(theta[j])
+    best = math.inf
+    bx = 0.0
+    by = 0.0
+    for a in range(2):
+        sa = 2.0 * a - 1.0
+        for b in range(2):
+            sb = 2.0 * b - 1.0
+            dx = pos[i, 0] + sa * oix - pos[j, 0] - sb * ojx
+            dy = pos[i, 1] + sa * oiy - pos[j, 1] - sb * ojy
+            d_sq = dx * dx + dy * dy
+            if d_sq < best:
+                best = d_sq
+                bx = dx
+                by = dy
+    return bx, by
+
+
+@njit(cache=True)
+def _separate_kernel(pos: np.ndarray, vel: np.ndarray, radius: np.ndarray, movable: np.ndarray, pairs: np.ndarray, offset: np.ndarray, theta: np.ndarray) -> None:
     for _ in range(_CONTACT_PASSES):
         for k in range(pairs.shape[0]):
             i = pairs[k, 0]
@@ -100,8 +162,11 @@ def _separate_kernel(pos: np.ndarray, vel: np.ndarray, radius: np.ndarray, movab
             total = mi + mj
             if total == 0.0:
                 continue
-            dx = pos[i, 0] - pos[j, 0]
-            dy = pos[i, 1] - pos[j, 1]
+            if offset[i] > 0.0 or offset[j] > 0.0:
+                dx, dy = _nearest_ends(pos, offset, theta, i, j)
+            else:
+                dx = pos[i, 0] - pos[j, 0]
+                dy = pos[i, 1] - pos[j, 1]
             d = math.sqrt(dx * dx + dy * dy)
             pen = radius[i] + radius[j] - d
             if pen <= 0.0:
@@ -126,9 +191,9 @@ def _separate_kernel(pos: np.ndarray, vel: np.ndarray, radius: np.ndarray, movab
                 vel[j, 1] += wj * rv * ny
 
 
-def _resolve_grid(grid: WallGrid, pos: np.ndarray, vel: np.ndarray, radius: np.ndarray, margin: float) -> np.ndarray:
+def _resolve_grid(grid: WallGrid, pos: np.ndarray, vel: np.ndarray, radius: np.ndarray, margin: float, offset: np.ndarray, theta: np.ndarray) -> np.ndarray:
     corrected = np.empty(pos.shape[0], dtype=np.bool_)
-    _resolve_kernel(pos, vel, radius, grid.segments, grid.cell_start, grid.cell_walls, grid.wall_cx0, grid.wall_cy0, grid.origin_x, grid.origin_y, grid.cell, grid.nx, grid.ny, margin, corrected)
+    _resolve_kernel(pos, vel, radius, grid.segments, grid.cell_start, grid.cell_walls, grid.wall_cx0, grid.wall_cy0, grid.origin_x, grid.origin_y, grid.cell, grid.nx, grid.ny, margin, offset, theta, corrected)
     return corrected
 
 
@@ -139,11 +204,14 @@ class WallProjectionResolver(CollisionResolver):
         self._warmup()
 
     def _warmup(self) -> None:
-        pos = np.array([[0.1, 0.1]], dtype=np.float64)
-        vel = np.array([[-1.0, -1.0]], dtype=np.float64)
-        radius = np.array([0.3], dtype=np.float64)
-        _resolve_grid(WallGrid([((0.0, 0.0), (1.0, 0.0))]), pos, vel, radius, self._margin)
-        _separate_kernel(np.zeros((2, 2)), np.zeros((2, 2)), np.full(2, 0.3), np.ones(2, dtype=np.bool_), np.array([[0, 1]], dtype=np.int64))
+        grid = WallGrid([((0.0, 0.0), (1.0, 0.0))])
+        pairs = np.array([[0, 1]], dtype=np.int64)
+        for offset in (0.0, 0.2):
+            pos = np.array([[0.1, 0.1]], dtype=np.float64)
+            vel = np.array([[-1.0, -1.0]], dtype=np.float64)
+            radius = np.array([0.3], dtype=np.float64)
+            _resolve_grid(grid, pos, vel, radius, self._margin, np.full(1, offset), np.zeros(1))
+            _separate_kernel(np.zeros((2, 2)), np.zeros((2, 2)), np.full(2, 0.3), np.ones(2, dtype=np.bool_), pairs, np.full(2, offset), np.zeros(2))
 
     def set_walls(self, segments: Segments) -> None:
         self._grid = WallGrid(segments)
@@ -157,17 +225,18 @@ class WallProjectionResolver(CollisionResolver):
         if n < 2:
             return
         radius = pool.agent_radius[:n]
-        pairs = cKDTree(pool.pos[:n]).query_pairs(2.0 * float(radius.max()), output_type="ndarray")
+        offset = pool.axial_offset[:n]
+        pairs = cKDTree(pool.pos[:n]).query_pairs(2.0 * float(radius.max()) + 2.0 * float(offset.max()), output_type="ndarray")
         if len(pairs) == 0:
             return
-        _separate_kernel(pool.pos[:n], pool.vel[:n], radius, pool.policy_idx[:n] != -1, pairs.astype(np.int64))
+        _separate_kernel(pool.pos[:n], pool.vel[:n], radius, pool.policy_idx[:n] != -1, pairs.astype(np.int64), offset, pool.theta[:n])
 
     def _project(self, pool: AgentPool) -> set[int]:
         n = pool.n
         if n == 0 or self._grid.segments.shape[0] == 0:
             return set()
 
-        corrected = _resolve_grid(self._grid, pool.pos[:n], pool.vel[:n], pool.agent_radius[:n], self._margin)
+        corrected = _resolve_grid(self._grid, pool.pos[:n], pool.vel[:n], pool.agent_radius[:n], self._margin, pool.axial_offset[:n], pool.theta[:n])
 
         if not corrected.any():
             return set()
