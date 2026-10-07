@@ -21,6 +21,7 @@ public:
   {
     offset_x_ = declare_parameter("offset_x", 0.0);
     offset_y_ = declare_parameter("offset_y", 0.0);
+    robot_bodies_ = declare_parameter("robot_bodies", true);
     publisher_ =
       create_publisher<visualization_msgs::msg::MarkerArray>(declare_parameter("output_topic",
         std::string("viz")), 100);
@@ -31,6 +32,8 @@ public:
             offset_x_ = p.as_double();
           } else if (p.get_name() == "offset_y") {
             offset_y_ = p.as_double();
+          } else if (p.get_name() == "robot_bodies") {
+            robot_bodies_ = p.as_bool();
           } else if (p.get_name() == "output_topic") {
             publisher_ = create_publisher<visualization_msgs::msg::MarkerArray>(p.as_string(), 100);
           }
@@ -57,7 +60,7 @@ private:
   void on_viz(const arena_humansim_msgs::msg::AgentViz & msg)
   {
     const KeySet & previous = keys_[current_ ^ 1];
-    build_markers(msg, previous, keys_[current_], markers_);
+    build_markers(msg, previous, keys_[current_], markers_, robot_bodies_);
     current_ ^= 1;
     shift_markers(markers_, offset_x_, offset_y_);
     if (!markers_.markers.empty()) {
@@ -71,6 +74,7 @@ private:
   rclcpp::TimerBase::SharedPtr watch_;
   double offset_x_ = 0.0;
   double offset_y_ = 0.0;
+  bool robot_bodies_ = true;
   std::array<KeySet, 2> keys_;
   size_t current_ = 0;
   visualization_msgs::msg::MarkerArray markers_;

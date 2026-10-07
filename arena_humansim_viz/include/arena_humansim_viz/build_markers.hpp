@@ -19,7 +19,8 @@ void build_markers(
   const arena_humansim_msgs::msg::AgentViz & viz,
   const KeySet & previous,
   KeySet & current,
-  visualization_msgs::msg::MarkerArray & out);
+  visualization_msgs::msg::MarkerArray & out,
+  bool robot_bodies = true);
 
 /// Moves every ADD marker's pose by (dx, dy), points stay relative to it.
 void shift_markers(visualization_msgs::msg::MarkerArray & markers, double dx, double dy);

@@ -207,7 +207,7 @@ size_t agent_count(const AgentViz & v)
       v.radius.size(), v.kind.size()});
 }
 
-void draw_agents(const AgentViz & v, size_t n, Emitter & em, KeySet & keys)
+void draw_agents(const AgentViz & v, size_t n, bool robot_bodies, Emitter & em, KeySet & keys)
 {
   Ids & body_ids = keys[kNsBody];
   Ids & head_ids = keys[kNsHeading];
@@ -218,6 +218,9 @@ void draw_agents(const AgentViz & v, size_t n, Emitter & em, KeySet & keys)
     const double th = v.theta[i];
     const double radius = v.radius[i];
     const bool is_robot = v.kind[i] == arena_humansim_msgs::msg::AgentState::KIND_ROBOT;
+    if (is_robot && !robot_bodies) {
+      continue;
+    }
     const double height = is_robot ? 0.5 : 1.7;
 
     Marker & body = em.add(kNsBody, body_ids, aid, Marker::CYLINDER);
@@ -529,7 +532,8 @@ void build_markers(
   const AgentViz & viz,
   const KeySet & previous,
   KeySet & current,
-  MarkerArray & out)
+  MarkerArray & out,
+  bool robot_bodies)
 {
   for (auto & entry : current) {
     entry.second.clear();
@@ -539,7 +543,7 @@ void build_markers(
   if (viz.level >= 1) {
     const size_t n = agent_count(viz);
     const AgentIndex index(viz.agent_id, n);
-    draw_agents(viz, n, em, current);
+    draw_agents(viz, n, robot_bodies, em, current);
     draw_cmds(viz, index, em, current);
     draw_needs(viz, index, em, current);
     draw_interactions(viz, index, em, current);

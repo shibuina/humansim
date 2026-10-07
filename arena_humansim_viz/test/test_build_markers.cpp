@@ -67,9 +67,9 @@ struct Builder
   int current = 0;
   MarkerArray out;
 
-  const MarkerArray & build(const AgentViz & v)
+  const MarkerArray & build(const AgentViz & v, bool robot_bodies = true)
   {
-    arena_humansim_viz::build_markers(v, keys[current ^ 1], keys[current], out);
+    arena_humansim_viz::build_markers(v, keys[current ^ 1], keys[current], out, robot_bodies);
     current ^= 1;
     return out;
   }
@@ -160,6 +160,28 @@ TEST(BuildMarkers, BodyAndHeadingForHumanAndRobot)
   ASSERT_NE(rhead, nullptr);
   expect_point(rhead->points[0], 3.0, 4.0, 0.55);
   expect_point(rhead->points[1], 3.7, 4.0, 0.55);
+}
+
+TEST(BuildMarkers, RobotBodyAndHeadingDroppedWhenDisabled)
+{
+  Agent human{1, 1.0, 2.0, 0.0};
+  Agent robot{2, 3.0, 4.0, 0.0};
+  robot.kind = AgentState::KIND_ROBOT;
+  const auto viz = make_viz(1, {human, robot});
+  Builder b;
+  b.build(viz);
+
+  const auto & ma = b.build(viz, false);
+  EXPECT_NE(find(ma, "agent_body", 1), nullptr);
+  EXPECT_NE(find(ma, "agent_heading", 1), nullptr);
+  EXPECT_EQ(find(ma, "agent_body", 2), nullptr);
+  EXPECT_EQ(find(ma, "agent_heading", 2), nullptr);
+  size_t deleted = 0;
+  for (const auto & m : ma.markers) {
+    deleted += m.id == 2 && m.action == Marker::DELETE &&
+      (m.ns == "agent_body" || m.ns == "agent_heading");
+  }
+  EXPECT_EQ(deleted, 2u);
 }
 
 TEST(BuildMarkers, NeedsLabelTextAndColorCycling)
