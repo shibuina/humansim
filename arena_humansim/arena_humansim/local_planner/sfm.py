@@ -336,10 +336,7 @@ class SFMPlanner(LocalPlanner):
         radii = pool.agent_radius[:n]
 
         if relax.shape[0] != n:
-            raise RuntimeError(
-                f"{type(self).__name__}: parameter arrays hold {relax.shape[0]} rows for {n} pooled agents, "
-                "this planner was never attached to the pool (AgentPool.attach_late)"
-            )
+            raise RuntimeError(f"{type(self).__name__}: parameter arrays hold {relax.shape[0]} rows for {n} pooled agents, this planner was never attached to the pool (AgentPool.attach_late)")
 
         d_goal = goal - pos
         dist_goal = np.hypot(d_goal[:, 0], d_goal[:, 1])[:, None]

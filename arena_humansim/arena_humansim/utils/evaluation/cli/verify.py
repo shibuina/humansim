@@ -19,6 +19,7 @@ Tripwires, most conclusive first:
   n_frames       under MIN_BAG_FRAMES recorded frames, from <trial>/_extracted.json
   contaminated   the recording manifest reports more than one publisher on a contract topic
 """
+
 from __future__ import annotations
 
 import argparse
