@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import json
 import os
-import urllib.request
 from collections.abc import Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -21,6 +20,7 @@ from arena_humansim.core.agents import BaseAgent
 from arena_humansim.utils.types import Pose2D
 
 from .. import LocalPlanner
+from ..robot.base import fetch_to_disk
 from ..socialgail.history import HistoryBuffer
 from .scaling import assemble_supplement, meters_to_pixels, pixels_to_meters, velocity_from_history
 
@@ -39,7 +39,6 @@ _DEFAULT_METERS_PER_PIXEL = 0.05
 _DEFAULT_SIGMA = 100.0
 
 _UPSTREAM_CHECKPOINT_URL = "https://raw.githubusercontent.com/realcrane/Human-Trajectory-Prediction-via-Neural-Social-Physics/main/saved_models/SDD_nsp_wo.pt"
-_FETCH_TIMEOUT_SECONDS = 60.0
 
 
 def _default_cache_dir() -> Path:
@@ -114,20 +113,9 @@ class NSPPlanner(LocalPlanner):
             return
         if path != _DEFAULT_CHECKPOINT:
             raise FileNotFoundError(f"NSP checkpoint not found at {path}")
-        path.parent.mkdir(parents=True, exist_ok=True)
-        tmp = path.with_suffix(path.suffix + ".tmp")
         self._logger.info(f"Fetching NSP checkpoint from {_UPSTREAM_CHECKPOINT_URL} -> {path}")
-        try:
-            with urllib.request.urlopen(_UPSTREAM_CHECKPOINT_URL, timeout=_FETCH_TIMEOUT_SECONDS) as resp, open(tmp, "wb") as f:
-                while True:
-                    chunk = resp.read(1 << 16)
-                    if not chunk:
-                        break
-                    f.write(chunk)
-            os.replace(tmp, path)
-        except Exception:
-            tmp.unlink(missing_ok=True)
-            raise
+        # Parallel test workers fetch the same checkpoint; fetch_to_disk gives each its own tmp file.
+        fetch_to_disk(_UPSTREAM_CHECKPOINT_URL, path)
 
     def _ensure_model(self) -> None:
         if self._model is not None:
