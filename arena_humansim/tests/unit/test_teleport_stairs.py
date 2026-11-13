@@ -290,3 +290,18 @@ def test_resent_stairs_keep_their_transfers_and_changed_cabins_drop_theirs(agent
     assert sorted(tz.transfers) == [1]
     tz.set_zones([], [])
     assert not tz.transfers
+
+
+def test_two_walkers_crossing_one_seam_the_opposite_ways_on_each_others_landing_swap(agent_factory: Callable[..., BaseAgent]) -> None:
+    tz = _zones([_up(), _up_b()])
+    pool = _pool(agent_factory, (1, 9.7, 5.2), (2, 22.8, 0.3))
+    crossed = {aid: (x, y) for aid, x, y, _ in tz.hold(pool, 0, 1000, 0.05, 0)}
+    assert crossed[1] == pytest.approx((22.8, 0.45 + LANDING_BACKOFF))
+    assert crossed[2] == pytest.approx((9.55 - LANDING_BACKOFF, 5.2))
+
+
+def test_a_walker_on_the_landing_that_crosses_nowhere_still_holds_the_crossing(agent_factory: Callable[..., BaseAgent]) -> None:
+    tz = _zones([_up(), _up_b()])
+    pool = _pool(agent_factory, (1, 9.7, 5.2), (2, 22.8, 0.5))
+    pool.policy_idx[1] = -1
+    assert tz.hold(pool, 0, 1000, 0.05, 0) == []
