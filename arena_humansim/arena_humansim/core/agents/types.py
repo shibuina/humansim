@@ -543,6 +543,8 @@ class AgentType:
     interaction_class: str = ""
     assets: tuple[str, ...] = ()
     climbs: tuple[str, ...] = attrs.field(default=STAIRS_KINDS, converter=tuple, validator=attrs.validators.deep_iterable(attrs.validators.in_(STAIRS_KINDS)))
+    # How many times its walking time a climb on still stairs feels like, against riding a running belt.
+    stair_effort: ParamDist = attrs.field(default=ParamDist(1.6, 0.5, clip_low=1.0, clip_high=3.0), converter=_as_paramdist)
 
     perception_stack: tuple[str, ...] = ("default",)
     local_planner: str | None = None
@@ -616,6 +618,7 @@ class SampledParams:
     locomotion: SampledLocomotion = attrs.Factory(SampledLocomotion)
     interaction_class: str = ""
     climbs: tuple[str, ...] = STAIRS_KINDS
+    stair_effort: float = 1.0
 
     perception_stack: tuple[str, ...] = ("default",)
     local_planner: str | None = None
@@ -718,6 +721,8 @@ def sample_agent_type(
     idle_gaze_rate_hz = _sample_dist(agent_type.idle_gaze_rate, rng)
     handedness = _sample_handedness(agent_type.handedness, rng)
     locomotion = _sample_locomotion(agent_type, rng)
+    # drawn last, so adding it left every earlier draw of the agent's stream as it was
+    stair_effort = _sample_dist(agent_type.stair_effort, rng)
 
     return SampledParams(
         name=agent_type.name,
@@ -735,6 +740,7 @@ def sample_agent_type(
         locomotion=locomotion,
         interaction_class=agent_type.interaction_class,
         climbs=agent_type.climbs,
+        stair_effort=stair_effort,
         perception_stack=agent_type.perception_stack,
         local_planner=agent_type.local_planner,
         global_planner=agent_type.global_planner,

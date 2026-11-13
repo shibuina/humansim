@@ -290,3 +290,95 @@ def test_resent_stairs_keep_their_transfers_and_changed_cabins_drop_theirs(agent
     assert sorted(tz.transfers) == [1]
     tz.set_zones([], [])
     assert not tz.transfers
+
+
+FLOOR: Segments = [
+    *zip(_box(0.0, 0.0, 30.0, 32.0), _box(0.0, 0.0, 30.0, 32.0)[1:] + _box(0.0, 0.0, 30.0, 32.0)[:1], strict=True),
+    ((15.0, 0.0), (15.0, 30.0)),
+    ((11.0, 1.0), (19.0, 1.0)),
+    ((11.0, 2.2), (19.0, 2.2)),
+    ((11.0, 3.0), (19.0, 3.0)),
+    ((11.0, 4.2), (19.0, 4.2)),
+]
+EAST = Pose2D(x=25.0, y=1.6)
+WEST = Pose2D(x=5.0, y=1.6)
+
+
+def _link(belt: float = 0.5) -> list[Zone]:
+    """An up escalator through the wall that splits one floor, both halves on it, boarding on the west half only."""
+    return [
+        _stair("link_b", ("link_t",), Pose2D(x=11.0, y=1.6), Pose2D(x=14.55, y=1.6), _box(11.0, 1.0, 15.0, 2.2), "escalator", belt),
+        _stair("link_t", (), Pose2D(x=19.0, y=1.6, theta=math.pi), Pose2D(x=15.45, y=1.6, theta=math.pi), _box(15.0, 1.0, 19.0, 2.2), "escalator", -belt),
+    ]
+
+
+@pytest.fixture(scope="module")
+def floor() -> DijkstraPlanner:
+    p = DijkstraPlanner(resolution=0.1)
+    p.set_walls(FLOOR)
+    return p
+
+
+def test_path_lengths_follow_the_plan_round_walls(floor: DijkstraPlanner) -> None:
+    around, straight = floor.path_lengths([(WEST, EAST), (Pose2D(x=5.0, y=31.0), Pose2D(x=25.0, y=31.0))])
+    assert around > 2.0 * math.hypot(10.0, 29.0) - 1.0
+    assert straight == pytest.approx(20.0, abs=0.5)
+
+
+def test_a_ride_on_the_walkers_own_floor_is_taken_when_quicker_than_walking_round(agent_factory: Callable[..., BaseAgent], floor: DijkstraPlanner) -> None:
+    tz = _zones(_link())
+    walker = _walker(agent_factory, floor, 1, WEST.x, WEST.y)
+    out = tz.steer([walker], _go([walker], EAST))
+    assert (tz.transfers[1].zone, tz.transfers[1].destination, tz.transfers[1].ride) == ("link_b", "link_t", True)
+    assert out[1].target_pose == tz.zones["link_b"].hold
+
+
+def test_walking_wins_where_the_ride_is_the_longer_way(agent_factory: Callable[..., BaseAgent], floor: DijkstraPlanner) -> None:
+    tz = _zones(_link())
+    walker = _walker(agent_factory, floor, 1, 5.0, 31.0)
+    goal = Pose2D(x=25.0, y=31.0)
+    out = tz.steer([walker], _go([walker], goal))
+    assert 1 not in tz.transfers and out[1].target_pose == goal
+
+
+def test_an_escalator_is_ridden_only_from_its_boarding_end(agent_factory: Callable[..., BaseAgent], floor: DijkstraPlanner) -> None:
+    tz = _zones(_link())
+    walker = _walker(agent_factory, floor, 1, EAST.x, EAST.y)
+    out = tz.steer([walker], _go([walker], WEST))
+    assert 1 not in tz.transfers and out[1].target_pose == WEST
+
+
+def test_a_walker_that_climbs_no_escalator_walks_round(agent_factory: Callable[..., BaseAgent], floor: DijkstraPlanner) -> None:
+    tz = _zones(_link())
+    walker = _walker(agent_factory, floor, 1, WEST.x, WEST.y, climbs=("stairs",))
+    tz.steer([walker], _go([walker], EAST))
+    assert 1 not in tz.transfers
+
+
+def test_a_ride_ends_on_the_far_half_and_the_walker_walks_on_without_choosing_again(agent_factory: Callable[..., BaseAgent], floor: DijkstraPlanner) -> None:
+    tz = _zones(_link())
+    walker = _walker(agent_factory, floor, 1, WEST.x, WEST.y)
+    tz.steer([walker], _go([walker], EAST))
+    walker.state.pose = Pose2D(x=13.0, y=1.6)
+    assert tz.steer([walker], _go([walker], EAST))[1].target_pose == tz.zones["link_b"].hold
+    walker.state.pose = Pose2D(x=15.4, y=1.6, theta=math.pi)
+    out = tz.steer([walker], _go([walker], EAST))
+    assert 1 not in tz.transfers and out[1].target_pose == EAST
+    assert tz._walks[1] == (EAST.x, EAST.y)
+
+
+def _steps() -> list[Zone]:
+    """Still stairs through the same wall beside the escalator, boarding both ways."""
+    return [
+        _stair("steps_b", ("steps_t",), Pose2D(x=11.0, y=3.6), Pose2D(x=14.55, y=3.6), _box(11.0, 3.0, 15.0, 4.2)),
+        _stair("steps_t", ("steps_b",), Pose2D(x=19.0, y=3.6, theta=math.pi), Pose2D(x=15.45, y=3.6, theta=math.pi), _box(15.0, 3.0, 19.0, 4.2)),
+    ]
+
+
+@pytest.mark.parametrize(("effort", "zone"), [(1.0, "steps_b"), (2.0, "link_b")])
+def test_a_walker_rides_beside_still_stairs_as_its_stair_effort_makes_the_climb_slower(agent_factory: Callable[..., BaseAgent], floor: DijkstraPlanner, effort: float, zone: str) -> None:
+    tz = _zones([*_link(), *_steps()])
+    walker = _walker(agent_factory, floor, 1, 5.0, 2.6)
+    walker.params = attrs.evolve(walker.params, stair_effort=effort)
+    tz.steer([walker], _go([walker], Pose2D(x=25.0, y=2.6)))
+    assert tz.transfers[1].zone == zone

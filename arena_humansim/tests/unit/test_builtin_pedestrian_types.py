@@ -80,3 +80,9 @@ def test_climbs_rejects_an_unknown_stair_kind() -> None:
     assert converter.structure({"name": "x", "climbs": ["stairs"]}, AgentType).climbs == ("stairs",)
     with pytest.raises(ValueError, match="ladder"):
         converter.structure({"name": "x", "climbs": ["ladder"]}, AgentType)
+
+
+def test_stair_effort_is_drawn_per_walker_from_its_type_within_its_clip(types: dict[str, AgentType]) -> None:
+    efforts = [sample_agent_type(types["adult"], np.random.default_rng(seed)).stair_effort for seed in range(40)]
+    assert all(1.0 <= e <= 3.0 for e in efforts) and len(set(efforts)) > 10
+    assert sample_agent_type(types["adult"], np.random.default_rng(7)).stair_effort == efforts[7]
