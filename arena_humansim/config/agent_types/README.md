@@ -67,6 +67,8 @@ Assets (`assets:`, optional list of ASA tags): tag query that selects the visual
 
 Climbs (`climbs:`, optional list among `stairs` and `escalator`, default both): the teleport zone stair kinds the type is routed over, see the [teleport zones](../../../README.md#stairs) section. A pedestrian whose type does not climb a kind takes a route over cabins and other stairs, or stays on its level when none exists. `wheelchair_manual` climbs `[]`. Any other word rejects the type.
 
+Stair effort (`stair_effort:`, a distribution like `desired_velocity`, default mean 1.6, std 0.5, clipped to 1-3): how many times its walking time a climb on still stairs feels like to a pedestrian of the type, drawn per pedestrian after every other parameter. It decides between still stairs, a running escalator and walking round where a stair joins two floors the pedestrian can also walk between (see the [stairs](../../../README.md#stairs) section): with the default, about two in three of the pedestrians reaching still stairs and an escalator of the same length from the same spot ride the escalator.
+
 Module selection (name strings, not distributions):
 
 - `local_planner` - one of [local_planner/README.md](../../arena_humansim/local_planner/README.md)'s `Available` table (default: launch param, normally `sfm`).
