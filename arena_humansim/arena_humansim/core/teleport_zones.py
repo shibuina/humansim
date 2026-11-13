@@ -279,28 +279,36 @@ class TeleportZones:
         return lx, ly, math.remainder(theta + dest.entry.theta + math.pi - zone.entry.theta, math.tau)
 
     @staticmethod
-    def _occupied(pool: AgentPool, i: int, x: float, y: float, landed: Sequence[tuple[float, float, float]]) -> bool:
-        """Whether row i standing at x, y would overlap another agent or a landing already taken this tick."""
+    def _occupants(pool: AgentPool, i: int, x: float, y: float) -> list[int]:
+        """Rows other than i that row i standing at x, y would overlap."""
         n, r = pool.n, float(pool.agent_radius[i])
         overlap = np.hypot(pool.pos[:n, 0] - x, pool.pos[:n, 1] - y) < pool.agent_radius[:n] + r
         overlap[i] = False
-        return bool(overlap.any()) or any(math.hypot(lx - x, ly - y) < lr + r for lx, ly, lr in landed)
+        return np.flatnonzero(overlap).tolist()
 
     def _cross(self, pool: AgentPool) -> list[tuple[int, float, float, float]]:
         """Teleports of the pedestrians past a stair seam whose landing is clear, the others held still at the seam."""
         self._held = set()
         teleports: list[tuple[int, float, float, float]] = []
         landed: list[tuple[float, float, float]] = []
+        crossing: dict[int, tuple[Zone, Zone, float, float, float]] = {}
         for i, zone in self._on_stairs(pool):
             x, y = float(pool.pos[i, 0]), float(pool.pos[i, 1])
             if not zone.destinations or not zone.past_seam(x, y):
                 continue
+            transfer = self.transfers.get(int(pool.agent_ids[i]))
+            dest = self.zones[transfer.destination if transfer is not None and transfer.zone == zone.name else zone.destinations[0]]
+            crossing[i] = (zone, dest, *self._landing(zone, dest, x, y, float(pool.theta[i])))
+        blockers = {i: self._occupants(pool, i, lx, ly) for i, (_, _, lx, ly, _) in crossing.items()}
+        # a landing taken only by pedestrians crossing this seam the other way is clear: each waits for the other's spot,
+        # so two-way traffic on one stair would hold both sides for good. They all cross this tick.
+        leaving = {i for i, rows in blockers.items() if rows and all(j in crossing and (crossing[j][0].name, crossing[j][1].name) == (crossing[i][1].name, crossing[i][0].name) for j in rows)}
+        for i, (zone, _dest, lx, ly, theta) in crossing.items():
             aid = int(pool.agent_ids[i])
-            transfer = self.transfers.get(aid)
-            dest = transfer.destination if transfer is not None and transfer.zone == zone.name else zone.destinations[0]
-            lx, ly, theta = self._landing(zone, self.zones[dest], x, y, float(pool.theta[i]))
-            if self._occupied(pool, i, lx, ly, landed):
+            r = float(pool.agent_radius[i])
+            if any(j not in leaving for j in blockers[i]) or any(math.hypot(ox - lx, oy - ly) < orad + r for ox, oy, orad in landed):
                 self._held.add(aid)
+                x, y = float(pool.pos[i, 0]), float(pool.pos[i, 1])
                 ax, ay = zone.axis
                 excess = zone.along(x, y) - zone.along(zone.hold.x, zone.hold.y)
                 pool.pos[i, 0] = x - excess * ax
@@ -309,7 +317,7 @@ class TeleportZones:
                 pool.prev_vel[i] = 0.0
                 pool.desired_vel[i] = 0.0
                 continue
-            landed.append((lx, ly, float(pool.agent_radius[i])))
+            landed.append((lx, ly, r))
             teleports.append((aid, lx, ly, theta))
         return teleports
 
