@@ -319,10 +319,14 @@ def floor() -> DijkstraPlanner:
     return p
 
 
-def test_path_lengths_follow_the_plan_round_walls(floor: DijkstraPlanner) -> None:
-    around, straight = floor.path_lengths([(WEST, EAST), (Pose2D(x=5.0, y=31.0), Pose2D(x=25.0, y=31.0))])
-    assert around > 2.0 * math.hypot(10.0, 29.0) - 1.0
-    assert straight == pytest.approx(20.0, abs=0.5)
+def _length(path: list[Pose2D] | None) -> float:
+    return sum(math.hypot(b.x - a.x, b.y - a.y) for a, b in zip(path, path[1:], strict=False)) if path else math.inf
+
+
+def test_paths_follow_the_plan_round_walls(floor: DijkstraPlanner) -> None:
+    around, straight = floor.paths([(WEST, EAST), (Pose2D(x=5.0, y=31.0), Pose2D(x=25.0, y=31.0))])
+    assert _length(around) > 2.0 * math.hypot(10.0, 29.0) - 1.0
+    assert _length(straight) == pytest.approx(20.0, abs=0.5)
 
 
 def test_a_ride_on_the_walkers_own_floor_is_taken_when_quicker_than_walking_round(agent_factory: Callable[..., BaseAgent], floor: DijkstraPlanner) -> None:
@@ -382,3 +386,39 @@ def test_a_walker_rides_beside_still_stairs_as_its_stair_effort_makes_the_climb_
     walker.params = attrs.evolve(walker.params, stair_effort=effort)
     tz.steer([walker], _go([walker], Pose2D(x=25.0, y=2.6)))
     assert tz.transfers[1].zone == zone
+
+
+LANES: Segments = [
+    *zip(_box(0.0, 0.0, 30.0, 12.0), _box(0.0, 0.0, 30.0, 12.0)[1:] + _box(0.0, 0.0, 30.0, 12.0)[:1], strict=True),
+    ((15.0, 0.0), (15.0, 1.0)),
+    ((15.0, 2.2), (15.0, 3.0)),
+    ((15.0, 4.2), (15.0, 11.0)),
+    ((11.0, 1.0), (19.0, 1.0)),
+    ((11.0, 2.2), (19.0, 2.2)),
+    ((11.0, 3.0), (19.0, 3.0)),
+    ((11.0, 4.2), (19.0, 4.2)),
+]
+
+
+@pytest.fixture(scope="module")
+def lanes() -> DijkstraPlanner:
+    """The escalator and the stairs as open lanes through the wall, as a joined pair on one level is."""
+    p = DijkstraPlanner(resolution=0.1)
+    p.set_walls(LANES)
+    return p
+
+
+def test_a_walk_against_a_running_belt_is_no_way_so_the_walker_takes_the_stairs(agent_factory: Callable[..., BaseAgent], lanes: DijkstraPlanner) -> None:
+    tz = _zones([*_link(), *_steps()])
+    walker = _walker(agent_factory, lanes, 1, 25.0, 1.6)
+    tz.steer([walker], _go([walker], Pose2D(x=5.0, y=1.6)))
+    assert (tz.transfers[1].zone, tz.transfers[1].ride) == ("steps_t", True)
+
+
+@pytest.mark.parametrize(("effort", "rides"), [(1.0, False), (3.0, True)])
+def test_a_walk_over_open_still_stairs_is_timed_by_the_stair_effort(agent_factory: Callable[..., BaseAgent], lanes: DijkstraPlanner, effort: float, rides: bool) -> None:
+    tz = _zones([*_link(), *_steps()])
+    walker = _walker(agent_factory, lanes, 1, 5.0, 3.6)
+    walker.params = attrs.evolve(walker.params, stair_effort=effort)
+    tz.steer([walker], _go([walker], Pose2D(x=25.0, y=3.6)))
+    assert (1 in tz.transfers and tz.transfers[1].zone == "link_b") == rides

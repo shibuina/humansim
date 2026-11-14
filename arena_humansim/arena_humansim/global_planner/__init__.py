@@ -196,15 +196,15 @@ class GlobalPlanner(PoolAware, WallAware, Loggable, ABC):
         seen = (cast_rays(self._wall_grid[1], starts, ends - starts, 1.0) >= 1.0) | (np.hypot(*(ends - starts).T) < 1e-6)
         return {aid for aid, ok in zip(ids, seen.tolist(), strict=True) if not ok}
 
-    def path_lengths(self, legs: Sequence[tuple[Pose2D, Pose2D]]) -> list[float]:
-        """Walking distance of each (start, goal) leg along its planned path, inf where no path reaches the goal."""
+    def paths(self, legs: Sequence[tuple[Pose2D, Pose2D]]) -> list[list[Pose2D] | None]:
+        """The planned path of each (start, goal) leg between snapped terminals, None where none reaches the goal."""
         if not legs:
             return []
         if not self._has_map():
-            return [math.hypot(goal.x - start.x, goal.y - start.y) for start, goal in legs]
+            return [[start, goal] for start, goal in legs]
         ends = self.snap_terminals([pose for leg in legs for pose in leg])
-        paths = self._plan([(k, ends[2 * k], ends[2 * k + 1]) for k in range(len(legs))])
-        return [sum(math.hypot(b.x - a.x, b.y - a.y) for a, b in zip(path, path[1:], strict=False)) if (path := paths.get(k)) else math.inf for k in range(len(legs))]
+        plans = self._plan([(k, ends[2 * k], ends[2 * k + 1]) for k in range(len(legs))])
+        return [plans.get(k) for k in range(len(legs))]
 
     def _sees(self, starts: np.ndarray, ends: np.ndarray) -> np.ndarray:
         """Whether each straight leg is walkable as a whole path."""

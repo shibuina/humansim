@@ -18,6 +18,7 @@ SLOT_SPACING = 0.7
 SLOT_MARGIN = 0.35
 STAIR_SPEED = 0.7
 LANDING_BACKOFF = 0.1
+WALK_SAMPLE = 0.25  # meters between the points a walk is timed at
 
 
 def _inside(pts: tuple[tuple[float, float], ...], x: float, y: float) -> bool:
@@ -233,20 +234,47 @@ class TeleportZones:
         rides = [(name, dest) for name, zone in sorted(self.zones.items()) if zone.kind and name not in blocked for dest in zone.destinations if dest in self.zones]
         if rides:
             near = agent.state.pose
-            lengths = planner.path_lengths([(near, target)] + [leg for name, dest in rides for leg in ((near, self.zones[name].entry), (self.zones[dest].entry, target))])
+            paths = planner.paths([(near, target)] + [leg for name, dest in rides for leg in ((near, self.zones[name].entry), (self.zones[dest].entry, target))])
             speed = max(agent.params.desired_velocity, 0.1)
-            best, quickest = None, lengths[0] / speed
+            effort = agent.params.stair_effort
+            best, quickest = None, self._walk_time(paths[0], speed, effort)
             for k, (name, dest) in enumerate(rides):
                 zone, far = self.zones[name], self.zones[dest]
                 run = math.hypot(zone.hold.x - zone.entry.x, zone.hold.y - zone.entry.y) + math.hypot(far.hold.x - far.entry.x, far.hold.y - far.entry.y)
-                # a still stair is climbed at stair speed and weighed by the pedestrian's effort, a belt carries it
-                time = (lengths[2 * k + 1] + lengths[2 * k + 2]) / speed + (run / abs(zone.belt) if zone.belt else run / min(speed, STAIR_SPEED) * agent.params.stair_effort)
+                ride = run / abs(zone.belt) if zone.belt else run / min(speed, STAIR_SPEED) * effort
+                time = self._walk_time(paths[2 * k + 1], speed, effort) + ride + self._walk_time(paths[2 * k + 2], speed, effort)
                 if time < quickest:
                     best, quickest = (name, dest), time
             if best is not None:
                 return best
         self._walks[aid] = goal
         return None
+
+    def _walk_time(self, path: list[Pose2D] | None, speed: float, effort: float) -> float:
+        """Time to walk a planned path, inf where it runs against a running belt."""
+        # a still stair half is climbed at stair speed times the pedestrian's effort, a running belt carries it
+        if not path:
+            return math.inf
+        stairs = [zone for zone in self.zones.values() if zone.kind]
+        time = 0.0
+        for a, b in zip(path, path[1:], strict=False):
+            length = math.hypot(b.x - a.x, b.y - a.y)
+            if length < 1e-9:
+                continue
+            steps = max(1, math.ceil(length / WALK_SAMPLE))
+            dx, dy, ds = (b.x - a.x) / length, (b.y - a.y) / length, length / steps
+            for k in range(steps):
+                x, y = a.x + dx * ds * (k + 0.5), a.y + dy * ds * (k + 0.5)
+                zone = next((zone for zone in stairs if zone.contains(x, y)), None)
+                if zone is None:
+                    time += ds / speed
+                elif not zone.belt:
+                    time += ds / min(speed, STAIR_SPEED) * effort
+                elif (dx * zone.axis[0] + dy * zone.axis[1]) * zone.belt < 0.0:
+                    return math.inf
+                else:
+                    time += ds / abs(zone.belt)
+        return time
 
     def _blocked(self, climbs: tuple[str, ...]) -> set[str]:
         """Stairs halves a pedestrian climbing these kinds is not routed into: other kinds and closed halves."""
